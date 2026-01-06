@@ -27,13 +27,13 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     private var lastContextInfo: ContextInfo? = null
     private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private var scheduledFuture: ScheduledFuture<*>? = null
-    private val switchDelayMs = 120L
+    private val switchDelayMs = 150L
 
     fun onEditorActivated(editor: Editor) {
         logger.info("onEditorActivated called")
         val data = extractEditorData(editor)
         logger.info("onEditorActivated: ${data.fileName}, offset=${data.caretOffset}")
-        scheduleInputMethodSwitch(data.fileName, data.documentText, data.isGitCommit, data.caretOffset, 400L)
+        scheduleInputMethodSwitch(data.fileName, data.documentText, data.isGitCommit, data.caretOffset, 450L)
     }
 
     private fun extractEditorData(editor: Editor): EditorData {
@@ -72,7 +72,7 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     override fun documentChanged(event: DocumentEvent) {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
         val data = extractEditorData(editor)
-        scheduleInputMethodSwitch(data.fileName, data.documentText, data.isGitCommit, data.caretOffset, 100L)
+        scheduleInputMethodSwitch(data.fileName, data.documentText, data.isGitCommit, data.caretOffset, 120L)
     }
 
     override fun beforeDocumentChange(event: DocumentEvent) {}

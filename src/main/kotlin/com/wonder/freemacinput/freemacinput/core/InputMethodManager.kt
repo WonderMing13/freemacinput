@@ -15,9 +15,9 @@ import java.awt.event.KeyEvent
 object InputMethodManager {
     private val logger = Logger.getInstance(InputMethodManager::class.java)
 
-    private const val SWITCH_COOLDOWN_MS = 140L
-    private const val MAX_SWITCH_ATTEMPTS = 2
-    private const val SWITCH_DELAY_MS = 150L
+    private const val SWITCH_COOLDOWN_MS = 160L
+    private const val MAX_SWITCH_ATTEMPTS = 3
+    private const val SWITCH_DELAY_MS = 170L
 
     @Volatile
     private var lastSwitchTime: Long = 0
@@ -32,7 +32,7 @@ object InputMethodManager {
     init {
         try {
             robot = java.awt.Robot()
-            robot!!.autoDelay = 10
+            robot!!.autoDelay = 12
             robotInitSuccess = true
             logger.info("Robot 初始化成功")
         } catch (e: Exception) {
@@ -155,8 +155,8 @@ object InputMethodManager {
         return try {
             logger.info("使用 im-select 切换到: $bundleId ($path)")
             val process = Runtime.getRuntime().exec(arrayOf(path, bundleId))
-            // 避免长时间阻塞：最多等待 300ms
-            val finished = process.waitFor(300, java.util.concurrent.TimeUnit.MILLISECONDS)
+            // 避免长时间阻塞：最多等待 600ms（更稳）
+            val finished = process.waitFor(600, java.util.concurrent.TimeUnit.MILLISECONDS)
             val exitCode = if (finished) process.exitValue() else -1
             if (!finished) {
                 logger.warn("im-select 在超时内未结束，尝试销毁进程并回退")
