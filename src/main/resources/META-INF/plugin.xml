@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<idea-plugin>
+    <id>com.wonder.freemacinput.FreeMacInput</id>
+    <name>FreeMacInput</name>
+    <vendor>Wonder</vendor>
+    <description><![CDATA[<h2>FreeMacInput - Intelligent Input Method Switcher</h2><p>Automatically switches input method based on editing context. Supports comments, strings, code, and more. Improves coding efficiency for bilingual developers.</p>]]></description>
+    <change-notes><![CDATA[Initial release with smart context detection for input method switching.]]></change-notes>
+    <depends>com.intellij.modules.platform</depends>
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationConfigurable instance="com.wonder.freemacinput.freemacinput.config.SettingsConfigurable"/>
+        <applicationService serviceImplementation="com.wonder.freemacinput.freemacinput.config.SettingsState"/>
+        <postStartupActivity implementation="com.wonder.freemacinput.freemacinput.StartupActivity"/>
+    </extensions>
+</idea-plugin>

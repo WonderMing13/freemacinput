@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/Users/wangdeming/IdeaProjects/FreeMacInput/gradlew tasks --all)",
+      "Bash(cat:*)",
+      "Bash(./gradlew build:*)",
+      "Bash(./gradlew compileKotlin:*)",
+      "Bash(./gradlew clean runIde:*)",
+      "Bash(unzip -l build/libs/FreeMacInput-1.0.0.jar)",
+      "Bash(rm:*)",
+      "Bash(./gradlew:*)",
+      "mcp__MiniMax__web_search",
+      "Bash(unzip:*)",
+      "Bash(find:*)",
+      "Bash(kotlinc:*)",
+      "Bash(sqlite3 \"/Users/wangdeming/Library/Application Support/com.apple.TCC/TCC.db\" \"SELECT client, auth_value FROM access WHERE client=''System Events'';\")",
+      "Bash(python3:*)",
+      "mcp__Playwright__playwright_navigate",
+      "mcp__Playwright__playwright_get_visible_text",
+      "mcp__Playwright__playwright_evaluate",
+      "mcp__filesystem__read_media_file",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "mcp__filesystem__edit_file",
+      "Bash(javap:*)",
+      "Bash(jar:*)"
+    ]
+  }
+}
