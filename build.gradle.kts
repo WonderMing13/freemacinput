@@ -63,6 +63,27 @@ tasks {
     clean {
         delete(".gradle", "build")
     }
+    
+    // 配置runIde任务
+    runIde {
+        // 设置沙箱目录
+        sandboxDirectory.set(file("$buildDir/idea-sandbox"))
+        
+        // 核心JVM参数：解决编辑器只读和文件写入问题
+        jvmArgs("-Didea.test.mode=false")
+        jvmArgs("-Didea.openapi.editor.EditorSettingsExternalizable.READ_ONLY=false")
+        jvmArgs("-Didea.config.read.only=false")
+        jvmArgs("-Didea.workspace.read.only=false")
+        // 禁用文件系统只读处理
+        jvmArgs("-Didea.filesystem.readonly.handling.mode=disabled")
+        // 禁用备份文件创建，解决macOS权限问题
+        jvmArgs("-Didea.configuration.store.no.backup=true")
+        // 项目和文档级别禁用只读
+        jvmArgs("-Didea.openapi.project.Project.ReadOnly=false")
+        jvmArgs("-Didea.openapi.editor.Document.ReadOnly=false")
+        // 禁用MacOS的com.apple.provenance属性限制
+        jvmArgs("-Didea.mac.provenance.disabled=true")
+    }
 }
 
 // 创建独立的纯逻辑测试任务

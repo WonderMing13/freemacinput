@@ -48,7 +48,7 @@ class SettingsState : PersistentStateComponent<SettingsState> {
 
     // ============ 输入源配置 ============
     var englishInputSource: String = "com.apple.keylayout.ABC"
-    var chineseInputSource: String = "com.apple.inputmethod.SCIM.ITABC"
+    var chineseInputSource: String = "com.apple.inputmethod.SCIM"
 
     // ============ 切换偏好与回退设置 ============
     // 是否优先使用 im-select 进行精确切换

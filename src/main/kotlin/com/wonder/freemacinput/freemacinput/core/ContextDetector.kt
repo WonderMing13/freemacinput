@@ -20,6 +20,29 @@ class ContextDetector {
     // 自定义规则列表，用于用户自定义匹配规则
     private val customRules = mutableListOf<CustomRule>()
 
+    // 缓存相关
+    private data class ContextCache(
+        val documentHash: Int,
+        val caretOffset: Int,
+        val isGitCommit: Boolean,
+        val contextInfo: ContextInfo
+    )
+
+    // 缓存最近的检测结果
+    private var cache: ContextCache? = null
+
+    // 缓存有效期（毫秒）
+    private val CACHE_VALIDITY_MS = 500L
+
+    // 最后缓存更新时间
+    private var lastCacheUpdateTime: Long = 0
+
+    // 计算文档文本的哈希值（使用简单哈希算法提高性能）
+    private fun hashDocument(documentText: String): Int {
+        // 使用Java的String.hashCode()方法，性能较好且足够唯一
+        return documentText.hashCode()
+    }
+
     /**
      * 检测当前编辑上下文场景
      *
@@ -29,11 +52,25 @@ class ContextDetector {
      * @return ContextInfo 包含检测到的场景类型和相关信息的对象
      */
     fun detectContext(documentText: String, isGitCommit: Boolean, caretOffset: Int): ContextInfo {
+        val now = System.currentTimeMillis()
+        val documentHash = hashDocument(documentText)
+
+        // 检查缓存是否有效
+        cache?.let {cached ->
+            if (cached.documentHash == documentHash && 
+                cached.caretOffset == caretOffset && 
+                cached.isGitCommit == isGitCommit && 
+                now - lastCacheUpdateTime < CACHE_VALIDITY_MS) {
+                logger.info("使用缓存的上下文检测结果")
+                return cached.contextInfo
+            }
+        }
+
+        // 缓存无效，执行实际检测
         return try {
             logger.info("detectContext: textLength=${documentText.length}, isGitCommit=$isGitCommit, offset=$caretOffset")
 
-            // 1. 检测Git提交窗口
-            if (isGitCommit) {
+            val result = if (isGitCommit) {
                 logger.info("检测到Git提交窗口")
                 ContextInfo(
                     type = ContextType.GIT_COMMIT,
@@ -41,12 +78,17 @@ class ContextDetector {
                     reason = "Git提交信息输入"
                 )
             } else {
-                // 2. 检测光标所在的当前行
-                val currentLine = getCurrentLine(documentText, caretOffset)
+                // 2. 获取光标所在的当前行及行位置信息
+                val safeOffset = minOf(caretOffset, documentText.length)
+                val lastNewline = documentText.lastIndexOf('\n', safeOffset - 1)
+                val lineStartOffset = if (lastNewline >= 0) lastNewline + 1 else 0
+                val nextNewline = documentText.indexOf('\n', safeOffset)
+                val lineEndOffset = if (nextNewline >= 0) nextNewline else documentText.length
+                val currentLine = documentText.substring(lineStartOffset, lineEndOffset)
                 logger.info("当前行: '$currentLine'")
 
                 // 检测字符串
-                val (inString, stringName, isChineseString) = detectStringContext(currentLine)
+                val (inString, stringName, isChineseString) = detectStringContext(currentLine, caretOffset, lineStartOffset, lineEndOffset)
                 if (inString) {
                     if (isChineseString) {
                         // 中文字符串 → 切换中文
@@ -107,6 +149,12 @@ class ContextDetector {
                     }
                 }
             }
+
+            // 更新缓存
+            cache = ContextCache(documentHash, caretOffset, isGitCommit, result)
+            lastCacheUpdateTime = now
+
+            result
         } catch (e: Exception) {
             logger.warn("detectContext 异常: ${e.javaClass.simpleName}: ${e.message}", e)
             ContextInfo(
@@ -137,45 +185,52 @@ class ContextDetector {
      *
      * @return Triple<是否在字符串中, 变量名, 是否为中文字符串>
      */
-    private fun detectStringContext(line: String): Triple<Boolean, String?, Boolean> {
+    private fun detectStringContext(line: String, caretOffset: Int, lineStartOffset: Int, lineEndOffset: Int): Triple<Boolean, String?, Boolean> {
+        // 计算光标在当前行的相对位置
+        val cursorInLinePos = caretOffset - lineStartOffset
+        
         // 查找当前行中的所有双引号对（非转义）
         val quotes = mutableListOf<Int>()
+        var inString = false
+        var quoteStart = -1
+        
         for (i in line.indices) {
             val char = line[i]
             if (char == '"' && (i == 0 || line[i - 1] != '\\')) {
-                quotes.add(i)
+                if (!inString) {
+                    // 开始一个新字符串
+                    quoteStart = i
+                    inString = true
+                } else {
+                    // 结束当前字符串
+                    quotes.add(quoteStart)
+                    quotes.add(i)
+                    inString = false
+                }
             }
         }
 
-        if (quotes.size < 2) {
-            // 没有完整的字符串对，检查是否有未闭合的字符串
-            if (quotes.size == 1) {
-                // 光标在未闭合字符串中
-                val beforeQuote = line.substring(0, quotes[0]).trim()
-                val varName = extractVariableName(beforeQuote)
-                // 检查字符串内容是否为中文
-                val stringContent = extractStringContent(line, quotes[0], line.length)
-                val isChinese = isChineseContent(stringContent)
-                return Triple(true, varName, isChinese)
-            }
+        // 处理未闭合的字符串
+        if (inString && quoteStart != -1) {
+            quotes.add(quoteStart)
+            quotes.add(line.length)
+        }
+
+        if (quotes.isEmpty()) {
             return Triple(false, null, false)
         }
 
-        // 查找光标位置应该在哪一对引号之间
-        // 假设光标在行末（取最后一个字符的位置）
-        val cursorPos = line.length - 1
-
-        // 遍历引号对，检查光标在哪一对之间
-        for (i in 0 until quotes.size - 1 step 2) {
-            val openQuote = quotes[i]
-            val closeQuote = quotes[i + 1]
-
-            if (cursorPos >= openQuote && cursorPos <= closeQuote) {
+        // 检查光标是否在任何字符串范围内
+        for (i in 0 until quotes.size step 2) {
+            val startQuote = quotes[i]
+            val endQuote = quotes[minOf(i + 1, quotes.size - 1)]
+            
+            if (cursorInLinePos >= startQuote && cursorInLinePos <= endQuote) {
                 // 光标在这对引号之间
-                val beforeQuote = line.substring(0, openQuote).trim()
+                val beforeQuote = line.substring(0, startQuote).trim()
                 val varName = extractVariableName(beforeQuote)
                 // 检查字符串内容是否为中文
-                val stringContent = extractStringContent(line, openQuote, closeQuote)
+                val stringContent = extractStringContent(line, startQuote, endQuote)
                 val isChinese = isChineseContent(stringContent)
                 return Triple(true, varName, isChinese)
             }
@@ -292,101 +347,67 @@ class ContextDetector {
 
     /**
      * 检测光标是否在块注释内部
-     * 修复版本：同时检查光标之前和当前行的注释标记
+     * 优化版本：只检查当前行和前面有限行数的注释状态，提高性能
      */
     private fun isInsideBlockComment(text: String, offset: Int): Boolean {
         val safeOffset = minOf(offset, text.length)
-
-        // 方法1: 忽略字符串/字符常量中的注释标记，计算到光标为止的注释深度
+        
+        // 获取当前行开始位置
+        val lastNewline = text.lastIndexOf('\n', safeOffset - 1)
+        val currentLineStart = if (lastNewline >= 0) lastNewline + 1 else 0
+        
+        // 只检查从当前行开始往上最多20行的内容，足够处理大多数情况
+        // 计算起始搜索位置
+        val startSearch = maxOf(0, text.lastIndexOf('\n', currentLineStart - 20))
+        val relevantText = text.substring(startSearch, safeOffset)
+        
         var depth = 0
         var i = 0
         var inString = false
         var inChar = false
 
-        while (i < safeOffset) {
-            val ch = text[i]
-            if (ch == '"' && (i == 0 || text[i - 1] != '\\')) {
+        while (i < relevantText.length) {
+            val ch = relevantText[i]
+            
+            // 处理字符串
+            if (ch == '"' && (i == 0 || relevantText[i - 1] != '\\')) {
                 inString = !inString
                 i++
                 continue
             }
-            if (ch == '\'' && (i == 0 || text[i - 1] != '\\')) {
+            
+            // 处理字符常量
+            if (ch == '\'' && (i == 0 || relevantText[i - 1] != '\\')) {
                 inChar = !inChar
                 i++
                 continue
             }
-            if (!inString && !inChar && i + 1 < safeOffset) {
-                val c1 = text[i]
-                val c2 = text[i + 1]
+            
+            // 处理块注释
+            if (!inString && !inChar && i + 1 < relevantText.length) {
+                val c1 = relevantText[i]
+                val c2 = relevantText[i + 1]
+                
                 if (c1 == '/' && c2 == '*') {
+                    // 块注释开始
                     depth++
                     i += 2
                     continue
                 }
+                
                 if (c1 == '*' && c2 == '/') {
+                    // 块注释结束
                     if (depth > 0) depth--
                     i += 2
                     continue
                 }
             }
+            
             i++
         }
 
-        if (depth > 0) return true
-
-        // 方法2: 当前行快速检查（忽略字符串与字符常量）
-        val currentLine = getCurrentLine(text, safeOffset)
-        return lineHasUnbalancedBlockComment(currentLine)
-    }
-
-    private fun lineHasUnbalancedBlockComment(line: String): Boolean {
-        var inString = false
-        var inChar = false
-        var opens = 0
-        var closes = 0
-        var i = 0
-        while (i < line.length) {
-            val ch = line[i]
-            if (ch == '"' && (i == 0 || line[i - 1] != '\\')) {
-                inString = !inString
-                i++
-                continue
-            }
-            if (ch == '\'' && (i == 0 || line[i - 1] != '\\')) {
-                inChar = !inChar
-                i++
-                continue
-            }
-            if (!inString && !inChar && i + 1 < line.length) {
-                val c1 = line[i]
-                val c2 = line[i + 1]
-                if (c1 == '/' && c2 == '*') {
-                    opens++
-                    i += 2
-                    continue
-                }
-                if (c1 == '*' && c2 == '/') {
-                    closes++
-                    i += 2
-                    continue
-                }
-            }
-            i++
-        }
-        return opens > closes
-    }
-
-    private fun countOccurrences(text: String, sub: String): Int {
-        if (sub.isEmpty()) return 0
-        var count = 0
-        var index = 0
-        while (true) {
-            index = text.indexOf(sub, index)
-            if (index < 0) break
-            count++
-            index += sub.length
-        }
-        return count
+        // 如果深度大于0，说明在块注释内部
+        return depth > 0
     }
 
     /**

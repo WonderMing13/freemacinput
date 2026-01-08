@@ -10,10 +10,11 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.wonder.freemacinput.freemacinput.core.*
 import com.wonder.freemacinput.freemacinput.service.InputMethodService
-import java.util.concurrent.ScheduledExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.ScheduledFuture
+import com.wonder.freemacinput.freemacinput.ui.ToastManager
+import com.intellij.openapi.application.ApplicationManager
+
+import java.util.Timer
+import java.util.TimerTask
 
 /**
  * 编辑器事件监听器
@@ -25,8 +26,8 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     private val inputMethodService = InputMethodService.getInstance(project)
 
     private var lastContextInfo: ContextInfo? = null
-    private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
-    private var scheduledFuture: ScheduledFuture<*>? = null
+    private val timer: Timer = Timer("InputMethodSwitchTimer", true)
+    private var scheduledTask: TimerTask? = null
     private val switchDelayMs = 150L
 
     fun onEditorActivated(editor: Editor) {
@@ -92,16 +93,18 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         delayMs: Long = switchDelayMs
     ) {
         logger.info("scheduleInputMethodSwitch: file=$fileName, offset=$caretOffset")
-        scheduledFuture?.cancel(false)
-        scheduledFuture = null
+        scheduledTask?.cancel()
+        scheduledTask = null
 
-        val task = Runnable {
-            logger.info("scheduled task running...")
-            scheduledFuture = null
-            detectAndSwitch(fileName, documentText, isGitCommit, caretOffset)
+        val task = object : TimerTask() {
+            override fun run() {
+                logger.info("scheduled task running...")
+                detectAndSwitch(fileName, documentText, isGitCommit, caretOffset)
+            }
         }
 
-        scheduledFuture = scheduler.schedule(task, delayMs, TimeUnit.MILLISECONDS)
+        timer.schedule(task, delayMs)
+        scheduledTask = task
         logger.info("task scheduled with delay=${delayMs}ms")
     }
 
@@ -144,6 +147,85 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         val success = InputMethodManager.switchTo(targetMethod, settings)
         val elapsed = System.currentTimeMillis() - startTs
         logger.info("switchTo 返回: $success, 耗时: ${elapsed}ms")
+
+        // 显示 Toast 提示
+        val editor = FileEditorManager.getInstance(project).selectedTextEditor
+        if (editor != null && success) {
+            val toastMessage = generateToastMessage(contextInfo, targetMethod, fileName)
+            val isChinese = targetMethod == InputMethodType.CHINESE
+            ToastManager.showToast(editor, toastMessage, isChinese)
+        }
+    }
+
+    /**
+     * 根据上下文和目标输入法生成提示消息
+     */
+    private fun generateToastMessage(
+        contextInfo: ContextInfo,
+        targetMethod: InputMethodType,
+        fileName: String
+    ): String {
+        return when (targetMethod) {
+            InputMethodType.CHINESE -> {
+                when (contextInfo.type) {
+                    ContextType.COMMENT -> "中文文字之间自动切换为中文"
+                    ContextType.STRING -> contextInfo.reason
+                    ContextType.GIT_COMMIT -> "Git 提交信息切换为中文"
+                    ContextType.CUSTOM_RULE -> "自定义规则切换为中文"
+                    else -> "已切换为中文"
+                }
+            }
+            InputMethodType.ENGLISH -> {
+                // 根据文件类型生成消息
+                val fileType = getFileType(fileName)
+                when (contextInfo.type) {
+                    ContextType.DEFAULT -> {
+                        when (fileType) {
+                            FileType.JAVA -> "Java 文件默认切换为英文"
+                            FileType.KOTLIN -> "Kotlin 文件默认切换为英文"
+                            FileType.PYTHON -> "Python 文件默认切换为英文"
+                            FileType.GO -> "Go 文件默认切换为英文"
+                            FileType.JAVASCRIPT -> "JavaScript 文件默认切换为英文"
+                            FileType.TYPESCRIPT -> "TypeScript 文件默认切换为英文"
+                            FileType.C_CPP -> "C/C++ 文件默认切换为英文"
+                            FileType.OTHER -> "代码区域切换为英文"
+                        }
+                    }
+                    ContextType.STRING -> {
+                        // 英文字符串保持英文
+                        "字符串区域保持英文"
+                    }
+                    else -> "已切换为英文"
+                }
+            }
+            else -> ""
+        }
+    }
+
+    /**
+     * 获取文件类型
+     */
+    private fun getFileType(fileName: String): FileType {
+        return when {
+            fileName.endsWith(".java", ignoreCase = true) -> FileType.JAVA
+            fileName.endsWith(".kt", ignoreCase = true) -> FileType.KOTLIN
+            fileName.endsWith(".py", ignoreCase = true) -> FileType.PYTHON
+            fileName.endsWith(".go", ignoreCase = true) -> FileType.GO
+            fileName.endsWith(".js", ignoreCase = true) -> FileType.JAVASCRIPT
+            fileName.endsWith(".ts", ignoreCase = true) -> FileType.TYPESCRIPT
+            fileName.endsWith(".c", ignoreCase = true) ||
+            fileName.endsWith(".cpp", ignoreCase = true) ||
+            fileName.endsWith(".h", ignoreCase = true) ||
+            fileName.endsWith(".hpp", ignoreCase = true) -> FileType.C_CPP
+            else -> FileType.OTHER
+        }
+    }
+
+    /**
+     * 文件类型枚举
+     */
+    private enum class FileType {
+        JAVA, KOTLIN, PYTHON, GO, JAVASCRIPT, TYPESCRIPT, C_CPP, OTHER
     }
 
     private fun determineInputMethod(contextInfo: ContextInfo): InputMethodType {
@@ -161,8 +243,9 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     }
 
     fun dispose() {
-        scheduler.shutdown()
+        timer.cancel()
         CaretRendererManager.disposeAll()
+        ToastManager.dismissAll()
     }
 
     private data class EditorData(

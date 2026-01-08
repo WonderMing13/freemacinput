@@ -23,7 +23,12 @@
       "Bash(grep:*)",
       "mcp__filesystem__edit_file",
       "Bash(javap:*)",
-      "Bash(jar:*)"
+      "Bash(jar:*)",
+      "mcp__Playwright__playwright_go_back",
+      "Bash(curl:*)",
+      "mcp__Playwright__playwright_screenshot",
+      "mcp__Playwright__playwright_get_visible_html",
+      "mcp__MiniMax__understand_image"
     ]
   }
 }

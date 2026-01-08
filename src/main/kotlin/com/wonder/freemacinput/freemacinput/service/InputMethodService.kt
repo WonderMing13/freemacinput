@@ -26,7 +26,7 @@ class InputMethodService(private val project: Project) {
 
     // 应用级设置状态（通过服务获取）
     private val settingsState: SettingsState by lazy {
-        ApplicationManager.getApplication().getService(SettingsState::class.java).state
+        ApplicationManager.getApplication().getService(SettingsState::class.java)
     }
 
     // 字符串习惯服务（延迟初始化）

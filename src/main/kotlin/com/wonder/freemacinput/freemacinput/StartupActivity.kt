@@ -19,6 +19,7 @@ import com.wonder.freemacinput.freemacinput.core.InputMethodManager
 import com.wonder.freemacinput.freemacinput.core.CapsLockState
 import com.wonder.freemacinput.freemacinput.listener.EditorEventListener
 import com.wonder.freemacinput.freemacinput.service.InputMethodService
+import com.wonder.freemacinput.freemacinput.ui.ToastManager
 
 /**
  * 启动活动 - 项目打开后执行初始化
@@ -77,6 +78,7 @@ class StartupActivity : IJStartupActivity, DumbAware {
                 override fun editorReleased(event: EditorFactoryEvent) {
                     event.editor?.let { editor ->
                         registeredEditors.remove(System.identityHashCode(editor).toLong())
+                        ToastManager.dismissToast(editor)
                     }
                 }
             }, connection)
@@ -88,7 +90,10 @@ class StartupActivity : IJStartupActivity, DumbAware {
                     triggerDetection(project)
                 }
 
-                override fun fileClosed(source: com.intellij.openapi.fileEditor.FileEditorManager, file: VirtualFile) {}
+                override fun fileClosed(source: com.intellij.openapi.fileEditor.FileEditorManager, file: VirtualFile) {
+                    // 文件关闭时也关闭 Toast
+                    ToastManager.dismissAll()
+                }
 
                 override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
                     logger.info("文件选择变化")
@@ -99,13 +104,15 @@ class StartupActivity : IJStartupActivity, DumbAware {
             // 启动 CapsLock 监控
             startCapsLockMonitor()
 
-        // 延迟触发首次检测
-        Thread.sleep(200)
-        triggerDetection(project)
-
-        ApplicationManager.getApplication().invokeLater {
-            Messages.showInfoMessage(project, "FreeMacInput 初始化完成", "FreeMacInput")
-        }
+        // 延迟触发首次检测（在后台线程执行）
+        Thread { 
+            try {
+                Thread.sleep(200)
+                triggerDetection(project)
+            } catch (e: Exception) {
+                logger.warn("延迟检测异常: ${e.message}", e)
+            }
+        }.start()
 
         logger.info("=== 初始化完成 ===")
         } catch (e: Exception) {

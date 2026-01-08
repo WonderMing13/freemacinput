@@ -15,9 +15,14 @@ import java.awt.event.KeyEvent
 object InputMethodManager {
     private val logger = Logger.getInstance(InputMethodManager::class.java)
 
-    private const val SWITCH_COOLDOWN_MS = 160L
+    // 切换冷却时间 - 增加到200ms以减少抖动
+    private const val SWITCH_COOLDOWN_MS = 200L
+    // 最大重试次数
     private const val MAX_SWITCH_ATTEMPTS = 3
-    private const val SWITCH_DELAY_MS = 170L
+    // 初始重试间隔
+    private const val INITIAL_SWITCH_DELAY_MS = 100L
+    // 重试间隔乘数（指数退避）
+    private const val RETRY_DELAY_MULTIPLIER = 1.5f
 
     @Volatile
     private var lastSwitchTime: Long = 0
@@ -81,7 +86,9 @@ object InputMethodManager {
                 success = true
                 break
             }
-            Thread.sleep(SWITCH_DELAY_MS)
+            // 指数退避策略：重试间隔随尝试次数增加而增加
+            val delay = (INITIAL_SWITCH_DELAY_MS * Math.pow(RETRY_DELAY_MULTIPLIER.toDouble(), i.toDouble())).toLong()
+            Thread.sleep(delay)
         }
 
         if (success) {
@@ -185,9 +192,16 @@ object InputMethodManager {
 
             robot?.keyRelease(KeyEvent.VK_CONTROL)
 
-            Thread.sleep(SWITCH_DELAY_MS)
+            // 使用初始延迟确保切换完成
+            Thread.sleep(INITIAL_SWITCH_DELAY_MS)
 
             logger.info("按键发送完成")
+            
+            // 更新状态变量
+            lastSwitchedTo = currentTargetMethod
+            lastSwitchTime = System.currentTimeMillis()
+            logger.info("Ctrl+Space 切换成功")
+            
             true
         } catch (e: Exception) {
             logger.warn("Robot 异常: ${e.message}", e)
@@ -232,7 +246,8 @@ object InputMethodManager {
                     robot?.keyRelease(KeyEvent.VK_CONTROL)
                 }
             }
-            Thread.sleep(SWITCH_DELAY_MS)
+            // 使用初始延迟确保切换完成
+            Thread.sleep(INITIAL_SWITCH_DELAY_MS)
             logger.info("按键发送完成")
             true
         } catch (e: Exception) {
@@ -247,9 +262,24 @@ object InputMethodManager {
 
             val script = "tell application \"System Events\" to key code 49 using control down"
             val process = Runtime.getRuntime().exec(arrayOf("osascript", "-e", script))
+            
+            // 读取输出和错误流
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val error = process.errorStream.bufferedReader().use { it.readText() }
+            
             val exitCode = process.waitFor()
             logger.info("AppleScript exitCode: $exitCode")
-            exitCode == 0
+            if (output.isNotBlank()) logger.info("AppleScript output: $output")
+            if (error.isNotBlank()) logger.warn("AppleScript error: $error")
+            
+            val success = exitCode == 0
+            if (success) {
+                // 更新状态变量
+                lastSwitchedTo = currentTargetMethod
+                lastSwitchTime = System.currentTimeMillis()
+                logger.info("AppleScript 切换成功")
+            }
+            success
         } catch (e: Exception) {
             logger.error("AppleScript 异常: ${e.message}", e)
             false
