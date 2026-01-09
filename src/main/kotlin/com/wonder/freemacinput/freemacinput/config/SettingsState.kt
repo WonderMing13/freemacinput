@@ -36,10 +36,8 @@ class SettingsState : PersistentStateComponent<SettingsState> {
     var englishInputSource: String = "com.apple.keylayout.ABC"
     var chineseInputSource: String = "com.apple.inputmethod.SCIM"
 
-    // ============ 切换偏好与回退设置 ============
-    // 是否优先使用 im-select 进行精确切换
-    var preferImSelect: Boolean = true
-    // 回退快捷键配置：可选值 "CTRL_SPACE", "ALT_SPACE", "CTRL_SHIFT_SPACE"
+    // ============ 回退快捷键配置 ============
+    // 可选值 "CTRL_SPACE", "ALT_SPACE", "CTRL_SHIFT_SPACE"
     var fallbackHotkey: String = "CTRL_SPACE"
 
     /**
@@ -61,7 +59,6 @@ class SettingsState : PersistentStateComponent<SettingsState> {
 
         this.englishInputSource = state.englishInputSource
         this.chineseInputSource = state.chineseInputSource
-        this.preferImSelect = state.preferImSelect
         this.fallbackHotkey = state.fallbackHotkey
     }
 }

@@ -28,7 +28,10 @@
       "Bash(curl:*)",
       "mcp__Playwright__playwright_screenshot",
       "mcp__Playwright__playwright_get_visible_html",
-      "mcp__MiniMax__understand_image"
+      "mcp__MiniMax__understand_image",
+      "mcp__filesystem__directory_tree",
+      "mcp__filesystem__read_multiple_files",
+      "mcp__filesystem__read_file"
     ]
   }
 }

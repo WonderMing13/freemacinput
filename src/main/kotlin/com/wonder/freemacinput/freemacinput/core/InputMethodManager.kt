@@ -2,10 +2,6 @@ package com.wonder.freemacinput.freemacinput.core
 
 import com.intellij.openapi.diagnostic.Logger
 import com.wonder.freemacinput.freemacinput.config.SettingsState
-import java.io.BufferedReader
-import java.io.File
-import java.io.InputStreamReader
-import java.awt.Toolkit
 import java.awt.event.KeyEvent
 
 /**
@@ -51,37 +47,14 @@ object InputMethodManager {
 
         logger.info("switchTo: target=$method, robotReady=$robotInitSuccess")
 
-        // 优先尝试使用 im-select 进行精确切换（如果配置与工具可用且偏好启用）
-        if (settings != null && settings.preferImSelect) {
-            val targetBundleId = when (method) {
-                InputMethodType.CHINESE -> settings.chineseInputSource
-                else -> settings.englishInputSource
-            }
-
-            if (targetBundleId.isNotBlank()) {
-                val imOk = switchByImSelect(targetBundleId)
-                if (imOk) {
-                    currentTargetMethod = method
-                    lastSwitchedTo = method
-                    lastSwitchTime = System.currentTimeMillis()
-                    logger.info("切换成功（im-select） -> $targetBundleId")
-                    return true
-                } else {
-                    logger.info("im-select 切换未成功，回退到按键模拟")
-                }
-            } else {
-                logger.info("目标Bundle ID为空，跳过 im-select，回退到按键模拟")
-            }
-        }
-
         if (!robotInitSuccess) {
             logger.info("Robot 未初始化，使用 AppleScript 回退")
-            return fallbackWithAppleScript()
+            return fallbackWithAppleScript(method)
         }
 
         var success = false
         for (i in 0 until MAX_SWITCH_ATTEMPTS) {
-            logger.info("执行切换尝试 ${i + 1}/$MAX_SWITCH_ATTEMPTS (fallback=${settings?.fallbackHotkey})")
+            logger.info("执行切换尝试 ${i + 1}/$MAX_SWITCH_ATTEMPTS (hotkey=${settings?.fallbackHotkey})")
             if (performHotkey(settings?.fallbackHotkey)) {
                 success = true
                 break
@@ -104,7 +77,9 @@ object InputMethodManager {
     }
 
     /**
-     * 是否需要执行切换，结合冷却期与最近目标来避免抖动
+     * 是否需要执行切换
+     * - 目标变化了：立即切换（精准响应）
+     * - 目标相同：冷却期内跳过（防抖）
      */
     fun shouldSwitch(targetMethod: InputMethodType): Pair<Boolean, String> {
         if (targetMethod == InputMethodType.AUTO) {
@@ -112,69 +87,18 @@ object InputMethodManager {
         }
 
         val now = System.currentTimeMillis()
-        if (now - lastSwitchTime < SWITCH_COOLDOWN_MS) {
-            return false to "冷却期内，跳过"
+
+        // 目标变化了？立即切换（精准响应）
+        if (targetMethod != lastSwitchedTo) {
+            return true to "目标变化，立即切换: $targetMethod"
         }
 
-        if (targetMethod == lastSwitchedTo && targetMethod == currentTargetMethod) {
-            return false to "与最近目标相同，跳过"
+        // 目标相同，检查冷却期
+        if (now - lastSwitchTime < SWITCH_COOLDOWN_MS) {
+            return false to "目标相同且在冷却期内，跳过"
         }
 
         return true to "需要切换"
-    }
-
-    // ============== im-select 精确切换支持 ==============
-    private fun findImSelectPath(): String? {
-        try {
-            val candidates = listOf(
-                "/opt/homebrew/bin/im-select",
-                "/usr/local/bin/im-select",
-                "/usr/bin/im-select"
-            )
-            for (c in candidates) {
-                if (File(c).exists()) {
-                    logger.info("检测到 im-select: $c")
-                    return c
-                }
-            }
-
-            val whichProc = Runtime.getRuntime().exec(arrayOf("/usr/bin/which", "im-select"))
-            val out = BufferedReader(InputStreamReader(whichProc.inputStream)).readLine()
-            val exit = whichProc.waitFor()
-            if (exit == 0 && out != null && out.isNotBlank()) {
-                val p = out.trim()
-                logger.info("which 找到 im-select: $p")
-                return p
-            } else {
-                logger.info("which 未找到 im-select（exit=$exit）")
-            }
-        } catch (e: Exception) {
-            logger.warn("检测 im-select 异常: ${e.message}", e)
-        }
-        return null
-    }
-
-    private fun switchByImSelect(bundleId: String): Boolean {
-        val path = findImSelectPath() ?: run {
-            logger.info("im-select 未安装或未找到，跳过")
-            return false
-        }
-        return try {
-            logger.info("使用 im-select 切换到: $bundleId ($path)")
-            val process = Runtime.getRuntime().exec(arrayOf(path, bundleId))
-            // 避免长时间阻塞：最多等待 600ms（更稳）
-            val finished = process.waitFor(600, java.util.concurrent.TimeUnit.MILLISECONDS)
-            val exitCode = if (finished) process.exitValue() else -1
-            if (!finished) {
-                logger.warn("im-select 在超时内未结束，尝试销毁进程并回退")
-                process.destroy()
-            }
-            logger.info("im-select exitCode: $exitCode")
-            exitCode == 0
-        } catch (e: Exception) {
-            logger.warn("im-select 调用异常: ${e.message}", e)
-            false
-        }
     }
 
     private fun performHotkey(hotkey: String?): Boolean {
@@ -220,30 +144,31 @@ object InputMethodManager {
             true
         } catch (e: Exception) {
             logger.warn("Robot 异常: ${e.message}", e)
-            fallbackWithAppleScript()
+            false
         }
     }
 
-    private fun fallbackWithAppleScript(): Boolean {
+    private fun fallbackWithAppleScript(method: InputMethodType): Boolean {
         return try {
-            logger.info("AppleScript 回退...")
+            logger.info("AppleScript 回退: target=$method")
 
             val script = "tell application \"System Events\" to key code 49 using control down"
             val process = Runtime.getRuntime().exec(arrayOf("osascript", "-e", script))
-            
+
             // 读取输出和错误流
             val output = process.inputStream.bufferedReader().use { it.readText() }
             val error = process.errorStream.bufferedReader().use { it.readText() }
-            
+
             val exitCode = process.waitFor()
             logger.info("AppleScript exitCode: $exitCode")
             if (output.isNotBlank()) logger.info("AppleScript output: $output")
             if (error.isNotBlank()) logger.warn("AppleScript error: $error")
-            
+
             val success = exitCode == 0
             if (success) {
                 // 更新状态变量
-                lastSwitchedTo = currentTargetMethod
+                currentTargetMethod = method
+                lastSwitchedTo = method
                 lastSwitchTime = System.currentTimeMillis()
                 logger.info("AppleScript 切换成功")
             }

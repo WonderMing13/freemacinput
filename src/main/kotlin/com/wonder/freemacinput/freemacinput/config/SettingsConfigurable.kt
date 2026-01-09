@@ -27,10 +27,9 @@ class SettingsConfigurable : Configurable {
     private var defaultMethodCombo: JComboBox<String>? = null
     private var commentMethodCombo: JComboBox<String>? = null
 
-    // 输入源与切换偏好组件
+    // 输入源组件
     private var englishInputSourceField: JTextField? = null
     private var chineseInputSourceField: JTextField? = null
-    private var preferImSelectCheckbox: JCheckBox? = null
     private var fallbackHotkeyCombo: JComboBox<String>? = null
 
     override fun getDisplayName(): String = "FreeMacInput"
@@ -61,14 +60,13 @@ class SettingsConfigurable : Configurable {
 
         addVerticalSpace(20)
 
-        // ============ 输入源与切换偏好 ============
-        addSection("输入源与切换偏好")
+        // ============ 输入源配置 ============
+        addSection("输入源配置")
         englishInputSourceField = JTextField(24)
         chineseInputSourceField = JTextField(24)
         addRowComponent("英文输入源 ID:", englishInputSourceField!!)
         addRowComponent("中文输入源 ID:", chineseInputSourceField!!)
-        preferImSelectCheckbox = addCheckbox("优先使用 im-select 精确切换", true)
-        addRow("回退快捷键:", createHotkeyCombo()).let { fallbackHotkeyCombo = it }
+        addRow("切换快捷键:", createHotkeyCombo()).let { fallbackHotkeyCombo = it }
 
         return mainPanel!!
     }
@@ -125,7 +123,6 @@ class SettingsConfigurable : Configurable {
                 getMethodFromCombo(commentMethodCombo) != state.commentMethod ||
                 (englishInputSourceField?.text ?: "") != state.englishInputSource ||
                 (chineseInputSourceField?.text ?: "") != state.chineseInputSource ||
-                (preferImSelectCheckbox?.isSelected ?: true) != state.preferImSelect ||
                 getHotkeyFromCombo(fallbackHotkeyCombo) != state.fallbackHotkey
     }
 
@@ -139,7 +136,6 @@ class SettingsConfigurable : Configurable {
         state.commentMethod = getMethodFromCombo(commentMethodCombo)
         state.englishInputSource = englishInputSourceField?.text ?: state.englishInputSource
         state.chineseInputSource = chineseInputSourceField?.text ?: state.chineseInputSource
-        state.preferImSelect = preferImSelectCheckbox?.isSelected ?: true
         state.fallbackHotkey = getHotkeyFromCombo(fallbackHotkeyCombo)
     }
 
@@ -154,7 +150,6 @@ class SettingsConfigurable : Configurable {
         setMethodToCombo(commentMethodCombo, state.commentMethod)
         englishInputSourceField?.text = state.englishInputSource
         chineseInputSourceField?.text = state.chineseInputSource
-        preferImSelectCheckbox?.isSelected = state.preferImSelect
         setHotkeyToCombo(fallbackHotkeyCombo, state.fallbackHotkey)
     }
 
