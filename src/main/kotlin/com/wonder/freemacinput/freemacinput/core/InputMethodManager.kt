@@ -177,38 +177,6 @@ object InputMethodManager {
         }
     }
 
-    private fun performCtrlSpace(): Boolean {
-        return try {
-            logger.info("发送 Ctrl+Space...")
-
-            robot?.keyPress(KeyEvent.VK_CONTROL)
-            Thread.sleep(15)
-
-            robot?.keyPress(KeyEvent.VK_SPACE)
-            Thread.sleep(15)
-
-            robot?.keyRelease(KeyEvent.VK_SPACE)
-            Thread.sleep(15)
-
-            robot?.keyRelease(KeyEvent.VK_CONTROL)
-
-            // 使用初始延迟确保切换完成
-            Thread.sleep(INITIAL_SWITCH_DELAY_MS)
-
-            logger.info("按键发送完成")
-            
-            // 更新状态变量
-            lastSwitchedTo = currentTargetMethod
-            lastSwitchTime = System.currentTimeMillis()
-            logger.info("Ctrl+Space 切换成功")
-            
-            true
-        } catch (e: Exception) {
-            logger.warn("Robot 异常: ${e.message}", e)
-            fallbackWithAppleScript()
-        }
-    }
-
     private fun performHotkey(hotkey: String?): Boolean {
         val hk = hotkey ?: "CTRL_SPACE"
         return try {
@@ -286,22 +254,4 @@ object InputMethodManager {
         }
     }
 
-    fun getCapsLockState(): CapsLockState {
-        return try {
-            val toolkit = Toolkit.getDefaultToolkit()
-            val capsLockOn = toolkit.getLockingKeyState(KeyEvent.VK_CAPS_LOCK)
-            if (capsLockOn) CapsLockState.ON else CapsLockState.OFF
-        } catch (e: Exception) {
-            logger.warn("获取 CapsLock 状态异常: ${e.message}", e)
-            CapsLockState.UNKNOWN
-        }
-    }
-
-    fun resetState() {
-        lastSwitchedTo = null
-        currentTargetMethod = InputMethodType.ENGLISH
-    }
-
-    fun getLastSwitchedTo(): InputMethodType? = lastSwitchedTo
-    fun getCurrentTarget(): InputMethodType = currentTargetMethod
 }

@@ -16,7 +16,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.StartupActivity as IJStartupActivity
 import com.intellij.openapi.vfs.VirtualFile
 import com.wonder.freemacinput.freemacinput.core.InputMethodManager
-import com.wonder.freemacinput.freemacinput.core.CapsLockState
+
 import com.wonder.freemacinput.freemacinput.listener.EditorEventListener
 import com.wonder.freemacinput.freemacinput.service.InputMethodService
 import com.wonder.freemacinput.freemacinput.ui.ToastManager
@@ -100,8 +100,7 @@ class StartupActivity : IJStartupActivity, DumbAware {
                 }
             })
 
-            // 启动 CapsLock 监控
-            startCapsLockMonitor()
+
 
         // 延迟触发首次检测（在后台线程执行）
         Thread { 
@@ -141,55 +140,4 @@ class StartupActivity : IJStartupActivity, DumbAware {
             logger.warn("triggerDetection 异常: ${e.message}", e)
         }
     }
-
-    private fun startCapsLockMonitor() {
-        CapsLockMonitor.start()
-        CapsLockMonitor.addListener(object : CapsLockStateListener {
-            override fun onCapsLockStateChanged(state: CapsLockState) {
-                logger.info("CapsLock: $state")
-            }
-        })
-        logger.info("CapsLock监控已启动")
-    }
-}
-
-object CapsLockMonitor {
-    private var isRunning = false
-    private var lastState: CapsLockState = CapsLockState.UNKNOWN
-    private val listeners = mutableListOf<CapsLockStateListener>()
-
-    fun start() {
-        if (isRunning) return
-        isRunning = true
-        monitorCapsLock()
-    }
-
-    private fun monitorCapsLock() {
-        Thread {
-            while (isRunning) {
-                try {
-                    val currentState = InputMethodManager.getCapsLockState()
-                    if (currentState != lastState) {
-                        lastState = currentState
-                        notifyListeners(currentState)
-                    }
-                    Thread.sleep(100)
-                } catch (e: Exception) {
-                    Thread.sleep(500)
-                }
-            }
-        }.start()
-    }
-
-    fun addListener(listener: CapsLockStateListener) {
-        listeners.add(listener)
-    }
-
-    private fun notifyListeners(state: CapsLockState) {
-        listeners.forEach { it.onCapsLockStateChanged(state) }
-    }
-}
-
-interface CapsLockStateListener {
-    fun onCapsLockStateChanged(state: CapsLockState)
 }

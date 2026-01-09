@@ -27,24 +27,10 @@ class SettingsState : PersistentStateComponent<SettingsState> {
     // ============ 各场景默认输入法 ============
     var defaultMethod: InputMethodType = InputMethodType.ENGLISH
     var commentMethod: InputMethodType = InputMethodType.CHINESE
-    var gitCommitMethod: InputMethodType = InputMethodType.CHINESE
-    var customEventMethod: InputMethodType = InputMethodType.CHINESE
-    var customRuleMethod: InputMethodType = InputMethodType.CHINESE
 
-    // ============ 工具窗口输入法配置 ============
-    var projectWindowMethod: InputMethodType = InputMethodType.ENGLISH
-    var terminalMethod: InputMethodType = InputMethodType.ENGLISH
-    var debugMethod: InputMethodType = InputMethodType.ENGLISH
-    var versionControlMethod: InputMethodType = InputMethodType.ENGLISH
-    var findMethod: InputMethodType = InputMethodType.ENGLISH
 
-    // ============ 自定义规则 ============
-    var customRules: List<CustomRuleData> = emptyList()
 
-    // ============ 字符串习惯记忆 ============
-    // 使用MutableMap存储详细的习惯数据
-    // 格式：stringName -> StringHabitData(JSON)
-    var stringHabitsMap: MutableMap<String, StringHabitData> = mutableMapOf()
+
 
     // ============ 输入源配置 ============
     var englishInputSource: String = "com.apple.keylayout.ABC"
@@ -71,16 +57,8 @@ class SettingsState : PersistentStateComponent<SettingsState> {
         this.isEnableCaretColor = state.isEnableCaretColor
         this.defaultMethod = state.defaultMethod
         this.commentMethod = state.commentMethod
-        this.gitCommitMethod = state.gitCommitMethod
-        this.customEventMethod = state.customEventMethod
-        this.customRuleMethod = state.customRuleMethod
-        this.projectWindowMethod = state.projectWindowMethod
-        this.terminalMethod = state.terminalMethod
-        this.debugMethod = state.debugMethod
-        this.versionControlMethod = state.versionControlMethod
-        this.findMethod = state.findMethod
-        this.customRules = state.customRules
-        this.stringHabitsMap = state.stringHabitsMap
+
+
         this.englishInputSource = state.englishInputSource
         this.chineseInputSource = state.chineseInputSource
         this.preferImSelect = state.preferImSelect
@@ -88,46 +66,4 @@ class SettingsState : PersistentStateComponent<SettingsState> {
     }
 }
 
-/**
- * 自定义规则数据
- */
-data class CustomRuleData(
-    var name: String = "",
-    var pattern: String = "",
-    var method: InputMethodType = InputMethodType.CHINESE
-)
 
-/**
- * 字符串习惯数据
- * 用于持久化存储
- *
- * @param name 字符串名称/标识
- * @param englishCount 英文使用次数
- * @param chineseCount 中文使用次数
- * @param lastUsedMethod 最后使用的输入法
- * @param lastUpdated 最后更新时间
- */
-data class StringHabitData(
-    var name: String = "",
-    var englishCount: Int = 0,
-    var chineseCount: Int = 0,
-    var lastUsedMethod: InputMethodType = InputMethodType.ENGLISH,
-    var lastUpdated: Long = System.currentTimeMillis()
-) {
-    /**
-     * 总使用次数
-     */
-    val totalCount: Int
-        get() = englishCount + chineseCount
-
-    /**
-     * 获取偏好输入法
-     * 基于使用频率判断用户偏好
-     */
-    val preferredMethod: InputMethodType
-        get() = when {
-            englishCount > chineseCount -> InputMethodType.ENGLISH
-            chineseCount > englishCount -> InputMethodType.CHINESE
-            else -> lastUsedMethod
-        }
-}

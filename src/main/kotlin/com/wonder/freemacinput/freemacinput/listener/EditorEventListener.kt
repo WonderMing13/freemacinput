@@ -34,19 +34,14 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         logger.info("onEditorActivated called")
         val data = extractEditorData(editor)
         logger.info("onEditorActivated: ${data.fileName}, offset=${data.caretOffset}")
-        scheduleInputMethodSwitch(data.fileName, data.documentText, data.isGitCommit, data.caretOffset, 450L)
+        scheduleInputMethodSwitch(data.fileName, data.documentText, data.caretOffset, 450L)
     }
 
     private fun extractEditorData(editor: Editor): EditorData {
         val fileName = editor.virtualFile?.name ?: "unknown"
         val documentText = editor.document.text
         val caretOffset = editor.caretModel.offset
-        val isGitCommit = isGitCommitFile(fileName)
-        return EditorData(fileName, documentText, isGitCommit, caretOffset)
-    }
-
-    private fun isGitCommitFile(fileName: String): Boolean {
-        return fileName.contains("COMMIT_EDITMSG") || fileName.endsWith(".tmp")
+        return EditorData(fileName, documentText, caretOffset)
     }
 
     override fun caretPositionChanged(e: CaretEvent) {
@@ -59,7 +54,7 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         logger.info("光标位置变化: $fileName, offset=$offset")
 
         val data = extractEditorData(editor)
-        scheduleInputMethodSwitch(data.fileName, data.documentText, data.isGitCommit, data.caretOffset)
+        scheduleInputMethodSwitch(data.fileName, data.documentText, data.caretOffset)
     }
 
     override fun caretAdded(e: CaretEvent) {
@@ -73,7 +68,7 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     override fun documentChanged(event: DocumentEvent) {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
         val data = extractEditorData(editor)
-        scheduleInputMethodSwitch(data.fileName, data.documentText, data.isGitCommit, data.caretOffset, 120L)
+        scheduleInputMethodSwitch(data.fileName, data.documentText, data.caretOffset, 120L)
     }
 
     override fun beforeDocumentChange(event: DocumentEvent) {}
@@ -81,14 +76,12 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     private fun updateCaretRenderer(editor: Editor) {
         val renderer = CaretRendererManager.getOrCreate(editor)
         renderer.setEnabled(inputMethodService.isEnableCaretColor())
-        renderer.setCapsLockState(InputMethodManager.getCapsLockState())
         renderer.refresh()
     }
 
     private fun scheduleInputMethodSwitch(
         fileName: String,
         documentText: String,
-        isGitCommit: Boolean,
         caretOffset: Int,
         delayMs: Long = switchDelayMs
     ) {
@@ -99,7 +92,7 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         val task = object : TimerTask() {
             override fun run() {
                 logger.info("scheduled task running...")
-                detectAndSwitch(fileName, documentText, isGitCommit, caretOffset)
+                detectAndSwitch(fileName, documentText, caretOffset)
             }
         }
 
@@ -111,7 +104,6 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     private fun detectAndSwitch(
         fileName: String,
         documentText: String,
-        isGitCommit: Boolean,
         caretOffset: Int
     ) {
         val startTs = System.currentTimeMillis()
@@ -122,7 +114,7 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
 
         logger.info("开始检测上下文... file=$fileName")
 
-        val contextInfo = contextDetector.detectContext(documentText, isGitCommit, caretOffset)
+        val contextInfo = contextDetector.detectContext(documentText, caretOffset)
         logger.info("检测到上下文: ${contextInfo.type}, 原因: ${contextInfo.reason}")
 
         val contextChanged = lastContextInfo == null || contextInfo.type != lastContextInfo?.type
@@ -135,7 +127,7 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         val targetMethod = determineInputMethod(contextInfo)
         logger.info("目标输入法: $targetMethod, 当前上下文: ${contextInfo.type}")
 
-        // 使用 InputMethodManager 的内部状态与冷却判定，不再依赖 CapsLock 误判
+        // 使用 InputMethodManager 的内部状态与冷却判定
         val (should, reason) = InputMethodManager.shouldSwitch(targetMethod)
         if (!should) {
             logger.info("shouldSwitch=false: $reason")
@@ -170,8 +162,6 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
                 when (contextInfo.type) {
                     ContextType.COMMENT -> "中文文字之间自动切换为中文"
                     ContextType.STRING -> contextInfo.reason
-                    ContextType.GIT_COMMIT -> "Git 提交信息切换为中文"
-                    ContextType.CUSTOM_RULE -> "自定义规则切换为中文"
                     else -> "已切换为中文"
                 }
             }
@@ -234,10 +224,6 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
             ContextType.DEFAULT -> settings.defaultMethod
             ContextType.COMMENT -> settings.commentMethod
             ContextType.STRING -> settings.commentMethod
-            ContextType.GIT_COMMIT -> settings.gitCommitMethod
-            ContextType.TOOL_WINDOW -> settings.defaultMethod
-            ContextType.CUSTOM_EVENT -> settings.customEventMethod
-            ContextType.CUSTOM_RULE -> settings.customRuleMethod
             ContextType.UNKNOWN -> settings.defaultMethod
         }
     }
@@ -251,7 +237,6 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     private data class EditorData(
         val fileName: String,
         val documentText: String,
-        val isGitCommit: Boolean,
         val caretOffset: Int
     )
 }

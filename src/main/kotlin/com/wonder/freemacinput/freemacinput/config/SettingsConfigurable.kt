@@ -26,10 +26,6 @@ class SettingsConfigurable : Configurable {
     // 各场景的输入法下拉框
     private var defaultMethodCombo: JComboBox<String>? = null
     private var commentMethodCombo: JComboBox<String>? = null
-    private var gitCommitMethodCombo: JComboBox<String>? = null
-    private var terminalMethodCombo: JComboBox<String>? = null
-    private var debugMethodCombo: JComboBox<String>? = null
-    private var projectMethodCombo: JComboBox<String>? = null
 
     // 输入源与切换偏好组件
     private var englishInputSourceField: JTextField? = null
@@ -62,15 +58,6 @@ class SettingsConfigurable : Configurable {
         addSection("代码区域")
         addRow("默认代码区域:", createMethodCombo()).let { defaultMethodCombo = it }
         addRow("注释区域:", createMethodCombo()).let { commentMethodCombo = it }
-        addRow("Git提交信息:", createMethodCombo()).let { gitCommitMethodCombo = it }
-
-        addVerticalSpace(20)
-
-        // ============ 工具窗口设置 ============
-        addSection("工具窗口")
-        addRow("Terminal:", createMethodCombo()).let { terminalMethodCombo = it }
-        addRow("Debug:", createMethodCombo()).let { debugMethodCombo = it }
-        addRow("Project:", createMethodCombo()).let { projectMethodCombo = it }
 
         addVerticalSpace(20)
 
@@ -136,10 +123,6 @@ class SettingsConfigurable : Configurable {
                 caretColorCheckbox?.isSelected != state.isEnableCaretColor ||
                 getMethodFromCombo(defaultMethodCombo) != state.defaultMethod ||
                 getMethodFromCombo(commentMethodCombo) != state.commentMethod ||
-                getMethodFromCombo(gitCommitMethodCombo) != state.gitCommitMethod ||
-                getMethodFromCombo(terminalMethodCombo) != state.terminalMethod ||
-                getMethodFromCombo(debugMethodCombo) != state.debugMethod ||
-                getMethodFromCombo(projectMethodCombo) != state.projectWindowMethod ||
                 (englishInputSourceField?.text ?: "") != state.englishInputSource ||
                 (chineseInputSourceField?.text ?: "") != state.chineseInputSource ||
                 (preferImSelectCheckbox?.isSelected ?: true) != state.preferImSelect ||
@@ -154,10 +137,6 @@ class SettingsConfigurable : Configurable {
         state.isEnableCaretColor = caretColorCheckbox?.isSelected ?: true
         state.defaultMethod = getMethodFromCombo(defaultMethodCombo)
         state.commentMethod = getMethodFromCombo(commentMethodCombo)
-        state.gitCommitMethod = getMethodFromCombo(gitCommitMethodCombo)
-        state.terminalMethod = getMethodFromCombo(terminalMethodCombo)
-        state.debugMethod = getMethodFromCombo(debugMethodCombo)
-        state.projectWindowMethod = getMethodFromCombo(projectMethodCombo)
         state.englishInputSource = englishInputSourceField?.text ?: state.englishInputSource
         state.chineseInputSource = chineseInputSourceField?.text ?: state.chineseInputSource
         state.preferImSelect = preferImSelectCheckbox?.isSelected ?: true
@@ -173,10 +152,6 @@ class SettingsConfigurable : Configurable {
 
         setMethodToCombo(defaultMethodCombo, state.defaultMethod)
         setMethodToCombo(commentMethodCombo, state.commentMethod)
-        setMethodToCombo(gitCommitMethodCombo, state.gitCommitMethod)
-        setMethodToCombo(terminalMethodCombo, state.terminalMethod)
-        setMethodToCombo(debugMethodCombo, state.debugMethod)
-        setMethodToCombo(projectMethodCombo, state.projectWindowMethod)
         englishInputSourceField?.text = state.englishInputSource
         chineseInputSourceField?.text = state.chineseInputSource
         preferImSelectCheckbox?.isSelected = state.preferImSelect
