@@ -70,9 +70,8 @@ class StartupActivity : IJStartupActivity, DumbAware {
                     logger.info("编辑器创建: $fileName")
                     registeredEditors.add(editorId)
 
-                    if (editor.virtualFile != null) {
-                        registerListeners(editor, editorListener!!)
-                    }
+                    // 无论是否有virtualFile，都注册监听器
+                    registerListeners(editor, editorListener!!)
                 }
 
                 override fun editorReleased(event: EditorFactoryEvent) {
