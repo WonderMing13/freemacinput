@@ -15,6 +15,7 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.StartupActivity as IJStartupActivity
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.util.messages.MessageBusConnection
 import com.wonder.freemacinput.freemacinput.core.InputMethodManager
 
 import com.wonder.freemacinput.freemacinput.listener.EditorEventListener
@@ -30,6 +31,7 @@ class StartupActivity : IJStartupActivity, DumbAware {
 
     private val registeredEditors = mutableSetOf<Long>()
     private var editorListener: EditorEventListener? = null
+    private var connection: MessageBusConnection? = null
 
     init {
         logger.info("StartupActivity 实例创建")
@@ -54,9 +56,40 @@ class StartupActivity : IJStartupActivity, DumbAware {
                 return
             }
 
+            // 初始化输入法管理器
+            logger.info("初始化输入法管理器...")
+            val initResult = InputMethodManager.initialize()
+            logger.info("输入法管理器初始化结果: $initResult")
+
+            if (!initResult) {
+                logger.warn("输入法管理器初始化失败")
+                ApplicationManager.getApplication().invokeLater {
+                    Messages.showWarningDialog(
+                        "输入法切换功能初始化失败！\n\n" +
+                        "可能原因：\n" +
+                        "1. 不支持当前操作系统\n" +
+                        "2. 缺少必要的系统权限\n\n" +
+                        "macOS 用户请检查：\n" +
+                        "系统设置 → 隐私与安全性 → 辅助功能/自动化\n" +
+                        "确保 IntelliJ IDEA 有权限\n\n" +
+                        "Windows 用户请检查：\n" +
+                        "确保已安装所需的输入语言",
+                        "FreeMacInput"
+                    )
+                }
+                return
+            }
+
+            logger.info("✅ 输入法管理器初始化成功")
+            
+            // 显示当前输入法信息
+            val currentIM = InputMethodManager.getCurrentInputMethodName()
+            logger.info("当前输入法: $currentIM")
+
             // 创建事件监听器
             editorListener = EditorEventListener(project)
-            val connection = project.messageBus.connect()
+            // 创建持久化的事件总线连接
+            connection = project.messageBus.connect(project)
 
             // 注册编辑器工厂事件监听
             EditorFactory.getInstance().addEditorFactoryListener(object : EditorFactoryListener {
@@ -80,10 +113,10 @@ class StartupActivity : IJStartupActivity, DumbAware {
                         ToastManager.dismissToast(editor)
                     }
                 }
-            }, connection)
+            }, project)
 
             // 注册文件切换监听
-            connection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
+            connection?.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
                 override fun fileOpened(source: com.intellij.openapi.fileEditor.FileEditorManager, file: VirtualFile) {
                     logger.info("文件打开: ${file.name}")
                     triggerDetection(project)
@@ -100,19 +133,17 @@ class StartupActivity : IJStartupActivity, DumbAware {
                 }
             })
 
+            // 延迟触发首次检测（在后台线程执行）
+            Thread {
+                try {
+                    Thread.sleep(200)
+                    triggerDetection(project)
+                } catch (e: Exception) {
+                    logger.warn("延迟检测异常: ${e.message}", e)
+                }
+            }.start()
 
-
-        // 延迟触发首次检测（在后台线程执行）
-        Thread { 
-            try {
-                Thread.sleep(200)
-                triggerDetection(project)
-            } catch (e: Exception) {
-                logger.warn("延迟检测异常: ${e.message}", e)
-            }
-        }.start()
-
-        logger.info("=== 初始化完成 ===")
+            logger.info("=== 初始化完成 ===")
         } catch (e: Exception) {
             logger.error("异常: ${e.message}", e)
         }

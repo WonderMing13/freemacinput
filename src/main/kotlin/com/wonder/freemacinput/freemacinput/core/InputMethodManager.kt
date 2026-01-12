@@ -1,182 +1,454 @@
 package com.wonder.freemacinput.freemacinput.core
 
 import com.intellij.openapi.diagnostic.Logger
-import com.wonder.freemacinput.freemacinput.config.SettingsState
-import java.awt.event.KeyEvent
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
-/**
- *
- * 输入法切换管理器（macOS平台实现）
- */
 object InputMethodManager {
     private val logger = Logger.getInstance(InputMethodManager::class.java)
 
-    // 切换冷却时间 - 增加到200ms以减少抖动
-    private const val SWITCH_COOLDOWN_MS = 200L
-    // 最大重试次数
-    private const val MAX_SWITCH_ATTEMPTS = 3
-    // 初始重试间隔
-    private const val INITIAL_SWITCH_DELAY_MS = 100L
-    // 重试间隔乘数（指数退避）
-    private const val RETRY_DELAY_MULTIPLIER = 1.5f
+    private val osName = System.getProperty("os.name", "").lowercase()
+    private val isMacOS = osName.contains("mac")
+    private val isWindows = osName.contains("win")
+
+    // 切换冷却时间（避免频繁切换）
+    private const val SWITCH_COOLDOWN_MS = 300L
 
     @Volatile
     private var lastSwitchTime: Long = 0
-    @Volatile
-    private var currentTargetMethod: InputMethodType = InputMethodType.ENGLISH
+
     @Volatile
     private var lastSwitchedTo: InputMethodType? = null
 
-    private var robot: java.awt.Robot? = null
-    private var robotInitSuccess: Boolean = false
+    // 记录当前实际输入法状态
+    @Volatile
+    private var currentActualMethod: InputMethodType = InputMethodType.ENGLISH
 
-    init {
-        try {
-            robot = java.awt.Robot()
-            robot!!.autoDelay = 12
-            robotInitSuccess = true
-            logger.info("Robot 初始化成功")
-        } catch (e: Exception) {
-            logger.warn("Robot 初始化失败: ${e.message}", e)
-            robotInitSuccess = false
-        }
-    }
+    // 缓存检测到的当前输入法
+    @Volatile
+    private var cachedCurrentIM: String? = null
+    @Volatile
+    private var cacheTime: Long = 0
+    private const val CACHE_DURATION_MS = 500L
 
-    fun switchTo(method: InputMethodType, settings: SettingsState? = null): Boolean {
-        if (method == InputMethodType.AUTO) return true
+    // macOS 输入法 ID 配置
+    private var macChineseIMId: String? = null
+    private var macEnglishIMId: String? = null
 
-        logger.info("switchTo: target=$method, robotReady=$robotInitSuccess")
+    // Windows 输入法 Locale ID 配置
+    private var winChineseLocale: String? = null
+    private var winEnglishLocale: String? = null
 
-        if (!robotInitSuccess) {
-            logger.info("Robot 未初始化，使用 AppleScript 回退")
-            return fallbackWithAppleScript(method)
-        }
+    data class SwitchResult(
+        val success: Boolean,
+        val message: String,
+        val actualMethod: InputMethodType
+    )
 
-        var success = false
-        for (i in 0 until MAX_SWITCH_ATTEMPTS) {
-            logger.info("执行切换尝试 ${i + 1}/$MAX_SWITCH_ATTEMPTS (hotkey=${settings?.fallbackHotkey})")
-            if (performHotkey(settings?.fallbackHotkey)) {
-                success = true
-                break
-            }
-            // 指数退避策略：重试间隔随尝试次数增加而增加
-            val delay = (INITIAL_SWITCH_DELAY_MS * Math.pow(RETRY_DELAY_MULTIPLIER.toDouble(), i.toDouble())).toLong()
-            Thread.sleep(delay)
-        }
-
-        if (success) {
-            currentTargetMethod = method
-            lastSwitchedTo = method
-            lastSwitchTime = System.currentTimeMillis()
-            logger.info("切换成功")
-        } else {
-            logger.warn("切换失败")
-        }
-
-        return success
+    /**
+     * 配置 macOS 输入法 ID
+     */
+    fun configureMacInputMethods(chineseId: String?, englishId: String?) {
+        macChineseIMId = chineseId
+        macEnglishIMId = englishId
+        logger.info("配置 macOS 输入法: 中文=$chineseId, 英文=$englishId")
     }
 
     /**
-     * 是否需要执行切换
-     * - 目标变化了：立即切换（精准响应）
-     * - 目标相同：冷却期内跳过（防抖）
+     * 配置 Windows 输入法 Locale
      */
+    fun configureWindowsInputMethods(chineseLocale: String?, englishLocale: String?) {
+        winChineseLocale = chineseLocale
+        winEnglishLocale = englishLocale
+        logger.info("配置 Windows 输入法: 中文=$chineseLocale, 英文=$englishLocale")
+    }
+
+    /**
+     * 初始化输入法管理器
+     */
+    fun initialize(): Boolean {
+        return when {
+            isMacOS -> initializeMacOS()
+            isWindows -> initializeWindows()
+            else -> {
+                logger.warn("不支持的操作系统: $osName")
+                false
+            }
+        }
+    }
+
+    private fun initializeMacOS(): Boolean {
+        logger.info("初始化 macOS 输入法管理器")
+        // 检测当前输入法
+        val current = detectCurrentInputMethod()
+        logger.info("当前输入法: $current")
+        return true
+    }
+
+    private fun initializeWindows(): Boolean {
+        logger.info("初始化 Windows 输入法管理器")
+        // 检测当前输入法
+        val current = detectCurrentInputMethod()
+        logger.info("当前输入法: $current")
+        return true
+    }
+
+    /**
+     * 切换到指定输入法
+     */
+    fun switchTo(method: InputMethodType, settings: com.wonder.freemacinput.freemacinput.config.SettingsState?): SwitchResult {
+        logger.info("========================================")
+        logger.info("   switchTo 被调用: method=$method")
+        logger.info("========================================")
+
+        if (!isMacOS && !isWindows) {
+            val result = SwitchResult(false, "不支持当前操作系统", InputMethodType.AUTO)
+            logger.warn("不支持的操作系统: $osName")
+            return result
+        }
+
+        if (method == InputMethodType.AUTO) {
+            val result = SwitchResult(true, "AUTO模式，跳过切换", InputMethodType.AUTO)
+            logger.info("AUTO 模式")
+            return result
+        }
+
+        // 冷却时间检查
+        val now = System.currentTimeMillis()
+        if (now - lastSwitchTime < SWITCH_COOLDOWN_MS && lastSwitchedTo == method) {
+            logger.info("冷却中，跳过切换（距上次切换: ${now - lastSwitchTime}ms）")
+            return SwitchResult(true, "冷却中", currentActualMethod)
+        }
+
+        // 检测当前输入法
+        val currentIM = detectCurrentInputMethod()
+        val isChinese = isChineseInputMethod(currentIM)
+        val currentType = if (isChinese) InputMethodType.CHINESE else InputMethodType.ENGLISH
+
+        // 如果目标与当前相同，不需要切换
+        if (currentType == method) {
+            logger.info("目标与当前相同，无需切换: $method")
+            currentActualMethod = method
+            return SwitchResult(true, "已经是${if (method == InputMethodType.CHINESE) "中文" else "英文"}输入法", method)
+        }
+
+        logger.info("🎯 开始切换: $currentType → $method")
+
+        // 执行切换
+        val success = when {
+            isMacOS -> switchMacOS(method)
+            isWindows -> switchWindows(method)
+            else -> false
+        }
+
+        if (success) {
+            lastSwitchTime = now
+            lastSwitchedTo = method
+            currentActualMethod = method
+            cachedCurrentIM = null // 清除缓存
+            val message = "成功切换为${if (method == InputMethodType.CHINESE) "中文" else "英文"}输入法"
+            logger.info("✅ $message")
+            return SwitchResult(true, message, method)
+        } else {
+            val message = "切换到${if (method == InputMethodType.CHINESE) "中文" else "英文"}失败"
+            logger.error("❌ $message")
+            return SwitchResult(false, message, currentActualMethod)
+        }
+    }
+
+    /**
+     * macOS 输入法切换
+     */
+    private fun switchMacOS(method: InputMethodType): Boolean {
+        // 检查 im-select 是否可用
+        if (!isImSelectAvailable()) {
+            logger.error("im-select 工具未安装，请运行: brew install im-select")
+            return false
+        }
+
+        val targetId = if (method == InputMethodType.CHINESE) macChineseIMId else macEnglishIMId
+
+        // 方法1: 使用 im-select 精确切换（如果配置了 ID）
+        if (targetId != null) {
+            logger.info("使用 im-select 切换到: $targetId")
+            return executeCommand("im-select", targetId)
+        }
+
+        // 方法2: 使用 im-select 自动检测切换
+        logger.info("使用 im-select 自动检测切换")
+        return switchMacOSWithImSelectAuto(method == InputMethodType.CHINESE)
+    }
+
+    /**
+     * 使用 im-select 自动检测并切换
+     */
+    private fun switchMacOSWithImSelectAuto(toChinese: Boolean): Boolean {
+        // 如果要切换到中文，先检查是否有中文输入法
+        if (toChinese) {
+            // 尝试常见的中文输入法 ID（按优先级排序）
+            val chineseIMIds = listOf(
+                "com.apple.inputmethod.SCIM.Pinyin",      // 拼音
+                "com.apple.inputmethod.SCIM.ITABC",       // 五笔
+                "com.apple.inputmethod.SCIM.Shuangpin",   // 双拼
+                "com.apple.inputmethod.SCIM.Wubi",        // 五笔（另一种）
+                "com.apple.inputmethod.TCIM.Cangjie",     // 仓颉
+                "com.apple.inputmethod.TCIM.Zhuyin",      // 注音
+                "com.sogou.inputmethod.sogou",            // 搜狗
+                "com.baidu.inputmethod.BaiduIM"           // 百度
+            )
+            
+            for (imId in chineseIMIds) {
+                if (executeCommand("im-select", imId)) {
+                    logger.info("✅ 切换到中文输入法: $imId")
+                    return true
+                }
+            }
+            
+            logger.warn("未找到可用的中文输入法，请在系统设置中添加中文输入法")
+            return false
+        } else {
+            // 切换到英文
+            val englishIMIds = listOf(
+                "com.apple.keylayout.ABC",
+                "com.apple.keylayout.US",
+                "com.apple.keylayout.USExtended"
+            )
+            
+            for (imId in englishIMIds) {
+                if (executeCommand("im-select", imId)) {
+                    logger.info("✅ 切换到英文输入法: $imId")
+                    return true
+                }
+            }
+            
+            logger.warn("未找到可用的英文输入法")
+            return false
+        }
+    }
+
+    /**
+     * Windows 输入法切换
+     */
+    private fun switchWindows(method: InputMethodType): Boolean {
+        val targetLocale = if (method == InputMethodType.CHINESE) winChineseLocale else winEnglishLocale
+
+        // 方法1: 使用 PowerShell InputLanguage（推荐）
+        if (targetLocale != null) {
+            logger.info("使用 PowerShell 切换到 Locale: $targetLocale")
+            return switchWindowsWithPowerShell(targetLocale)
+        }
+
+        // 方法2: 使用默认 Locale ID
+        logger.info("使用默认 Locale ID 切换")
+        val defaultLocale = if (method == InputMethodType.CHINESE) "0804" else "0409"
+        return switchWindowsWithPowerShell(defaultLocale)
+    }
+
+    /**
+     * 使用 PowerShell 切换 Windows 输入法
+     */
+    private fun switchWindowsWithPowerShell(localeId: String): Boolean {
+        val script = """
+            Add-Type -AssemblyName System.Windows.Forms
+            ${'$'}lang = [System.Windows.Forms.InputLanguage]::InstalledInputLanguages | Where-Object { ${'$'}_.Culture.LCID -eq 0x$localeId }
+            if (${'$'}lang) {
+                [System.Windows.Forms.InputLanguage]::CurrentInputLanguage = ${'$'}lang
+                exit 0
+            } else {
+                exit 1
+            }
+        """.trimIndent()
+
+        return executePowerShell(script)
+    }
+
+    /**
+     * 检测当前输入法
+     */
+    private fun detectCurrentInputMethod(): String {
+        // 检查缓存
+        val now = System.currentTimeMillis()
+        if (cachedCurrentIM != null && now - cacheTime < CACHE_DURATION_MS) {
+            return cachedCurrentIM!!
+        }
+
+        val result = when {
+            isMacOS -> detectMacOSInputMethod()
+            isWindows -> detectWindowsInputMethod()
+            else -> "unknown"
+        }
+
+        cachedCurrentIM = result
+        cacheTime = now
+        return result
+    }
+
+    /**
+     * 检测 macOS 当前输入法
+     */
+    private fun detectMacOSInputMethod(): String {
+        // 使用 im-select
+        if (isImSelectAvailable()) {
+            val result = executeCommandWithOutput("im-select")
+            if (result != null && result.isNotEmpty()) {
+                logger.info("im-select 检测到: $result")
+                return result.trim()
+            }
+        }
+        
+        logger.warn("无法检测当前输入法，请安装 im-select: brew install im-select")
+        return "unknown"
+    }
+
+    /**
+     * 检测 Windows 当前输入法
+     */
+    private fun detectWindowsInputMethod(): String {
+        val script = """
+            Add-Type -AssemblyName System.Windows.Forms
+            [System.Windows.Forms.InputLanguage]::CurrentInputLanguage.Culture.DisplayName
+        """.trimIndent()
+
+        return executePowerShellWithOutput(script) ?: "unknown"
+    }
+
+    /**
+     * 判断是否为中文输入法
+     */
+    private fun isChineseInputMethod(imName: String): Boolean {
+        val chineseKeywords = listOf(
+            "中文", "拼音", "简体", "繁体", "五笔", "仓颉",
+            "Chinese", "Pinyin", "Simplified", "Traditional", "Wubi", "Cangjie",
+            "SCIM", "TCIM", "0804", "0404"
+        )
+        return chineseKeywords.any { imName.contains(it, ignoreCase = true) }
+    }
+
+    /**
+     * 检查 im-select 是否可用
+     */
+    private fun isImSelectAvailable(): Boolean {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("which", "im-select"))
+            process.waitFor() == 0
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 执行命令
+     */
+    private fun executeCommand(vararg command: String): Boolean {
+        return try {
+            val process = Runtime.getRuntime().exec(command)
+            val exitCode = process.waitFor()
+            exitCode == 0
+        } catch (e: Exception) {
+            logger.error("执行命令失败: ${command.joinToString(" ")}", e)
+            false
+        }
+    }
+
+    /**
+     * 执行命令并获取输出
+     */
+    private fun executeCommandWithOutput(vararg command: String): String? {
+        return try {
+            val process = Runtime.getRuntime().exec(command)
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val output = reader.readText().trim()
+            process.waitFor()
+            output
+        } catch (e: Exception) {
+            logger.error("执行命令失败: ${command.joinToString(" ")}", e)
+            null
+        }
+    }
+
+    /**
+     * 执行 PowerShell
+     */
+    private fun executePowerShell(script: String): Boolean {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf(
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script
+            ))
+            val exitCode = process.waitFor()
+            exitCode == 0
+        } catch (e: Exception) {
+            logger.error("执行 PowerShell 失败", e)
+            false
+        }
+    }
+
+    /**
+     * 执行 PowerShell 并获取输出
+     */
+    private fun executePowerShellWithOutput(script: String): String? {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf(
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script
+            ))
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val output = reader.readText().trim()
+            process.waitFor()
+            output
+        } catch (e: Exception) {
+            logger.error("执行 PowerShell 失败", e)
+            null
+        }
+    }
+
     fun shouldSwitch(targetMethod: InputMethodType): Pair<Boolean, String> {
         if (targetMethod == InputMethodType.AUTO) {
             return false to "AUTO模式，跳过"
         }
 
-        val now = System.currentTimeMillis()
+        // 检测当前输入法
+        val currentIM = detectCurrentInputMethod()
+        val isChinese = isChineseInputMethod(currentIM)
+        val currentType = if (isChinese) InputMethodType.CHINESE else InputMethodType.ENGLISH
 
-        // 目标变化了？立即切换（精准响应）
-        if (targetMethod != lastSwitchedTo) {
-            return true to "目标变化，立即切换: $targetMethod"
+        // 如果目标与当前相同，不需要切换
+        if (currentType == targetMethod) {
+            return false to "当前已经是$targetMethod"
         }
 
-        // 目标相同，检查冷却期
-        if (now - lastSwitchTime < SWITCH_COOLDOWN_MS) {
-            return false to "目标相同且在冷却期内，跳过"
-        }
-
-        return true to "需要切换"
+        return true to "需要切换到 $targetMethod"
     }
 
-    private fun performHotkey(hotkey: String?): Boolean {
-        val hk = hotkey ?: "CTRL_SPACE"
-        return try {
-            when (hk) {
-                "ALT_SPACE" -> {
-                    logger.info("发送 Alt+Space...")
-                    robot?.keyPress(KeyEvent.VK_ALT)
-                    Thread.sleep(15)
-                    robot?.keyPress(KeyEvent.VK_SPACE)
-                    Thread.sleep(15)
-                    robot?.keyRelease(KeyEvent.VK_SPACE)
-                    Thread.sleep(15)
-                    robot?.keyRelease(KeyEvent.VK_ALT)
-                }
-                "CTRL_SHIFT_SPACE" -> {
-                    logger.info("发送 Ctrl+Shift+Space...")
-                    robot?.keyPress(KeyEvent.VK_CONTROL)
-                    robot?.keyPress(KeyEvent.VK_SHIFT)
-                    Thread.sleep(15)
-                    robot?.keyPress(KeyEvent.VK_SPACE)
-                    Thread.sleep(15)
-                    robot?.keyRelease(KeyEvent.VK_SPACE)
-                    Thread.sleep(15)
-                    robot?.keyRelease(KeyEvent.VK_SHIFT)
-                    robot?.keyRelease(KeyEvent.VK_CONTROL)
-                }
-                else -> {
-                    logger.info("发送 Ctrl+Space...")
-                    robot?.keyPress(KeyEvent.VK_CONTROL)
-                    Thread.sleep(15)
-                    robot?.keyPress(KeyEvent.VK_SPACE)
-                    Thread.sleep(15)
-                    robot?.keyRelease(KeyEvent.VK_SPACE)
-                    Thread.sleep(15)
-                    robot?.keyRelease(KeyEvent.VK_CONTROL)
-                }
-            }
-            // 使用初始延迟确保切换完成
-            Thread.sleep(INITIAL_SWITCH_DELAY_MS)
-            logger.info("按键发送完成")
-            true
-        } catch (e: Exception) {
-            logger.warn("Robot 异常: ${e.message}", e)
-            false
-        }
+    fun clearCache() {
+        lastSwitchTime = 0
+        lastSwitchedTo = null
+        currentActualMethod = InputMethodType.ENGLISH
+        cachedCurrentIM = null
+        cacheTime = 0
     }
 
-    private fun fallbackWithAppleScript(method: InputMethodType): Boolean {
-        return try {
-            logger.info("AppleScript 回退: target=$method")
-
-            val script = "tell application \"System Events\" to key code 49 using control down"
-            val process = Runtime.getRuntime().exec(arrayOf("osascript", "-e", script))
-
-            // 读取输出和错误流
-            val output = process.inputStream.bufferedReader().use { it.readText() }
-            val error = process.errorStream.bufferedReader().use { it.readText() }
-
-            val exitCode = process.waitFor()
-            logger.info("AppleScript exitCode: $exitCode")
-            if (output.isNotBlank()) logger.info("AppleScript output: $output")
-            if (error.isNotBlank()) logger.warn("AppleScript error: $error")
-
-            val success = exitCode == 0
-            if (success) {
-                // 更新状态变量
-                currentTargetMethod = method
-                lastSwitchedTo = method
-                lastSwitchTime = System.currentTimeMillis()
-                logger.info("AppleScript 切换成功")
-            }
-            success
-        } catch (e: Exception) {
-            logger.error("AppleScript 异常: ${e.message}", e)
-            false
-        }
+    fun getCurrentMethod(): InputMethodType {
+        val currentIM = detectCurrentInputMethod()
+        val isChinese = isChineseInputMethod(currentIM)
+        return if (isChinese) InputMethodType.CHINESE else InputMethodType.ENGLISH
     }
 
+    fun setCurrentMethod(method: InputMethodType) {
+        currentActualMethod = method
+        logger.info("手动设置当前输入法: $method")
+    }
+
+    /**
+     * 获取当前输入法名称（用于调试）
+     */
+    fun getCurrentInputMethodName(): String {
+        return detectCurrentInputMethod()
+    }
 }

@@ -35,10 +35,6 @@ object ToastManager {
 
     // Toast 显示配置
     private const val TOAST_DURATION_MS = 1200L  // 显示时长
-    private const val TOAST_MIN_DELAY_MS = 200L  // 最小显示间隔
-
-    @Volatile
-    private var lastShowTime = 0L
 
     /**
      * 在指定编辑器位置显示 Toast 通知
@@ -48,71 +44,85 @@ object ToastManager {
      * @param isChinese 是否为中文模式（影响颜色）
      */
     fun showToast(editor: Editor, message: String, isChinese: Boolean) {
-        logger.info("尝试显示Toast: $message")
-        val now = System.currentTimeMillis()
-        if (now - lastShowTime < TOAST_MIN_DELAY_MS) {
-            logger.info("Toast显示间隔太短，跳过")
-            return
-        }
+        logger.info("=== Toast 开始显示 ===")
+        logger.info("消息: $message")
+        logger.info("是否中文: $isChinese")
 
         // 直接获取服务和设置
         val project = editor.project ?: run {
-            logger.info("Editor没有project，跳过")
+            logger.warn("Editor没有project，跳过显示Toast")
             return
         }
+        logger.info("Project: ${project.name}")
+
         val service = com.wonder.freemacinput.freemacinput.service.InputMethodService.getInstance(project)
         val settings = service.getSettings()
-        
+
         logger.info("isShowHints设置: ${settings.isShowHints}")
         if (!settings.isShowHints) {
-            logger.info("用户关闭了提示，跳过")
+            logger.warn("用户关闭了提示，跳过显示Toast")
             return
         }
 
         // UI 操作必须在 EDT 线程执行
         ApplicationManager.getApplication().invokeLater {
             try {
+                logger.info("=== EDT 线程开始执行 Toast ===")
+
                 // 先移除现有的 popup
                 dismissToast(editor)
-                
+
                 val content = createToastContent(message, isChinese)
+                logger.info("Toast 内容创建完成")
 
                 // 获取光标的屏幕位置
-                val point = getCaretScreenPosition(editor) ?: return@invokeLater
-                
+                val point = getCaretScreenPosition(editor)
+                if (point == null) {
+                    logger.warn("无法获取光标位置，跳过显示Toast")
+                    return@invokeLater
+                }
+                logger.info("光标位置: x=${point.x}, y=${point.y}")
+
                 // 获取屏幕尺寸
                 val graphicsEnvironment = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
                 val screenBounds = graphicsEnvironment.defaultScreenDevice.defaultConfiguration.bounds
-                
+                logger.info("屏幕边界: width=${screenBounds.width}, height=${screenBounds.height}")
+
                 // 估算提示框的大小（为了位置计算）
                 val estimatedWidth = message.length * 8 + 32 // 估算宽度
                 val estimatedHeight = 34 // 固定高度
-                
+                logger.info("Toast 估算尺寸: width=$estimatedWidth, height=$estimatedHeight")
+
                 // 调整位置，使提示显示在光标下方，同时确保不会超出屏幕边界
                 var adjustedX = point.x
                 var adjustedY = point.y + 18
-                
+
                 // 确保提示框不超出屏幕右边界
                 if (adjustedX + estimatedWidth > screenBounds.width) {
                     adjustedX = screenBounds.width - estimatedWidth - 10
+                    logger.info("调整X到右边界内: $adjustedX")
                 }
-                
+
                 // 确保提示框不超出屏幕左边界
                 if (adjustedX < 10) {
                     adjustedX = 10
+                    logger.info("调整X到左边界内: $adjustedX")
                 }
-                
+
                 // 确保提示框不超出屏幕下边界
                 if (adjustedY + estimatedHeight > screenBounds.height) {
                     adjustedY = point.y - estimatedHeight - 10
+                    logger.info("调整Y到上边界内: $adjustedY")
                 }
-                
+
                 // 确保提示框不超出屏幕上边界
                 if (adjustedY < 10) {
                     adjustedY = 10
+                    logger.info("调整Y到顶部: $adjustedY")
                 }
-                
+
                 val adjustedPoint = Point(adjustedX, adjustedY)
+                logger.info("最终Toast位置: x=$adjustedX, y=$adjustedY")
 
                 val popup = JBPopupFactory.getInstance()
                     .createComponentPopupBuilder(content, null)
@@ -123,22 +133,26 @@ object ToastManager {
                     .createPopup()
 
                 popup.show(RelativePoint(adjustedPoint))
+                logger.info("Popup.show() 调用完成")
 
                 activePopups[editor] = popup
-                lastShowTime = System.currentTimeMillis()
+                logger.info("Popup 已添加到 activePopups")
 
                 // 定时自动消失
                 scheduler.schedule({
                     // 关闭 popup 也需要在 EDT 线程执行
                     ApplicationManager.getApplication().invokeLater {
+                        logger.info("定时器触发，关闭 Toast")
                         dismissToast(editor)
                     }
                 }, TOAST_DURATION_MS, TimeUnit.MILLISECONDS)
 
-                logger.info("显示 Toast: $message")
+                logger.info("✅ Toast 显示成功: $message")
+                logger.info("✅ Toast 颜色: ${if (isChinese) "中文(蓝)" else "英文(绿)"}")
 
             } catch (e: Exception) {
-                logger.warn("显示 Toast 异常: ${e.message}", e)
+                logger.error("❌ 显示 Toast 异常: ${e.message}", e)
+                e.printStackTrace()
             }
         }
     }

@@ -28,18 +28,6 @@ class SettingsState : PersistentStateComponent<SettingsState> {
     var defaultMethod: InputMethodType = InputMethodType.ENGLISH
     var commentMethod: InputMethodType = InputMethodType.CHINESE
 
-
-
-
-
-    // ============ 输入源配置 ============
-    var englishInputSource: String = "com.apple.keylayout.ABC"
-    var chineseInputSource: String = "com.apple.inputmethod.SCIM"
-
-    // ============ 回退快捷键配置 ============
-    // 可选值 "CTRL_SPACE", "ALT_SPACE", "CTRL_SHIFT_SPACE"
-    var fallbackHotkey: String = "CTRL_SPACE"
-
     /**
      * 保存当前状态
      */
@@ -49,17 +37,11 @@ class SettingsState : PersistentStateComponent<SettingsState> {
      * 加载保存的状态
      */
     override fun loadState(state: SettingsState) {
-        // 逐个复制属性以确保类型安全
         this.isEnabled = state.isEnabled
         this.isShowHints = state.isShowHints
         this.isEnableCaretColor = state.isEnableCaretColor
         this.defaultMethod = state.defaultMethod
         this.commentMethod = state.commentMethod
-
-
-        this.englishInputSource = state.englishInputSource
-        this.chineseInputSource = state.chineseInputSource
-        this.fallbackHotkey = state.fallbackHotkey
     }
 }
 

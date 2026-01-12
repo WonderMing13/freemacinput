@@ -44,7 +44,7 @@ class ContextDetector {
             }
 
             // 检测注释
-            val inComment = detectCommentContext(currentLine, lineOffset)
+            val inComment = detectCommentContext(documentText, caretOffset, lineStartOffset, lineEndOffset, currentLine, lineOffset)
             if (inComment) {
                 logger.info("检测到注释")
                 return ContextInfo(
@@ -53,10 +53,10 @@ class ContextDetector {
                 )
             }
 
-            // 代码区域 → 默认切换英文
+             // 代码区域 → 默认切换英文
             logger.info("检测到代码区域")
             ContextInfo(
-                type = ContextType.DEFAULT,
+                type = ContextType.CODE,
                 reason = "代码区域"
             )
         } catch (e: Exception) {
@@ -119,13 +119,21 @@ class ContextDetector {
     }
 
     /**
-     * 检测注释上下文
+     * 检测注释上下文（优化版本，支持跨行块注释）
      *
+     * @param documentText 完整文档文本
+     * @param caretOffset 光标位置
+     * @param lineStartOffset 当前行起始位置
+     * @param lineEndOffset 当前行结束位置
      * @param currentLine 当前行文本
      * @param lineOffset 光标在行内的偏移
      * @return 是否在注释内
      */
     private fun detectCommentContext(
+        documentText: String,
+        caretOffset: Int,
+        lineStartOffset: Int,
+        lineEndOffset: Int,
         currentLine: String,
         lineOffset: Int
     ): Boolean {
@@ -133,35 +141,117 @@ class ContextDetector {
             return false
         }
 
-        // 简单的注释检测
+        // 检测行注释：// 开头的行
         val lineContent = currentLine.trimStart()
         if (lineContent.startsWith("//")) {
             return true
         }
 
-        // 检测是否在块注释内
+        // 检测行内注释：代码后面跟 // 的情况
+        val beforeCaret = currentLine.substring(0, lineOffset)
+        val commentIndex = beforeCaret.indexOf("//")
+        if (commentIndex >= 0) {
+            // 检查 // 是否在字符串内
+            val beforeComment = beforeCaret.substring(0, commentIndex)
+            if (!isInString(beforeComment)) {
+                return true
+            }
+        }
+
+        // 检测块注释：需要向前扫描查找 /* 和 */
+        // 从文档开始到光标位置，查找未闭合的块注释
         var inBlockComment = false
         var i = 0
-
-        while (i < currentLine.length) {
-            val c = currentLine[i]
-            if (i < currentLine.length - 1) {
-                val next = currentLine[i + 1]
+        val scanEnd = kotlin.math.min(caretOffset + 1, documentText.length)
+        
+        while (i < scanEnd) {
+            if (i < documentText.length - 1) {
+                val c = documentText[i]
+                val next = documentText[i + 1]
+                
+                // 跳过字符串内的内容
+                if (c == '"' || c == '\'') {
+                    val stringEnd = findStringEnd(documentText, i, c)
+                    if (stringEnd > i) {
+                        i = stringEnd + 1
+                        continue
+                    }
+                }
+                
                 if (c == '/' && next == '*') {
                     inBlockComment = true
-                    i++
+                    i += 2
+                    continue
                 } else if (c == '*' && next == '/') {
                     inBlockComment = false
-                    i++
+                    i += 2
+                    continue
                 }
             }
-
-            if (i == lineOffset) {
+            i++
+            
+            // 如果已经扫描到光标位置，可以提前退出
+            if (i >= caretOffset) {
                 break
             }
-            i++
         }
 
         return inBlockComment
+    }
+    
+    /**
+     * 检查文本是否在字符串内（简化版，用于注释检测）
+     */
+    private fun isInString(text: String): Boolean {
+        var inString = false
+        var stringType: Char? = null
+        var escape = false
+        
+        for (c in text) {
+            if (escape) {
+                escape = false
+                continue
+            }
+            if (c == '\\') {
+                escape = true
+                continue
+            }
+            if (c == '"' || c == '\'') {
+                if (inString && c == stringType) {
+                    inString = false
+                    stringType = null
+                } else if (!inString) {
+                    inString = true
+                    stringType = c
+                }
+            }
+        }
+        return inString
+    }
+    
+    /**
+     * 查找字符串结束位置
+     */
+    private fun findStringEnd(text: String, start: Int, quoteChar: Char): Int {
+        var i = start + 1
+        var escape = false
+        while (i < text.length) {
+            val c = text[i]
+            if (escape) {
+                escape = false
+                i++
+                continue
+            }
+            if (c == '\\') {
+                escape = true
+                i++
+                continue
+            }
+            if (c == quoteChar) {
+                return i
+            }
+            i++
+        }
+        return -1
     }
 }

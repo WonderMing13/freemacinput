@@ -9,6 +9,7 @@ import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.wonder.freemacinput.freemacinput.core.*
+import com.wonder.freemacinput.freemacinput.core.InputMethodManager
 import com.wonder.freemacinput.freemacinput.service.InputMethodService
 import com.wonder.freemacinput.freemacinput.ui.ToastManager
 import com.intellij.openapi.application.ApplicationManager
@@ -29,6 +30,10 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     private val timer: Timer = Timer("InputMethodSwitchTimer", true)
     private var scheduledTask: TimerTask? = null
     private val switchDelayMs = 150L
+    
+    // 缓存文档文本，避免频繁获取
+    private var cachedDocumentText: String? = null
+    private var cachedDocumentLength: Int = -1
 
     fun onEditorActivated(editor: Editor) {
         logger.info("onEditorActivated called")
@@ -39,8 +44,20 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
 
     private fun extractEditorData(editor: Editor): EditorData {
         val fileName = editor.virtualFile?.name ?: "unknown"
-        val documentText = editor.document.text
+        val document = editor.document
         val caretOffset = editor.caretModel.offset
+        
+        // 优化：只在文档长度变化时重新获取文本，或使用缓存
+        val currentLength = document.textLength
+        val documentText = if (cachedDocumentText != null && cachedDocumentLength == currentLength) {
+            cachedDocumentText!!
+        } else {
+            val text = document.text
+            cachedDocumentText = text
+            cachedDocumentLength = currentLength
+            text
+        }
+        
         return EditorData(fileName, documentText, caretOffset)
     }
 
@@ -67,6 +84,9 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
 
     override fun documentChanged(event: DocumentEvent) {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
+        // 文档变化时清除缓存
+        cachedDocumentText = null
+        cachedDocumentLength = -1
         val data = extractEditorData(editor)
         scheduleInputMethodSwitch(data.fileName, data.documentText, data.caretOffset, 120L)
     }
@@ -117,18 +137,15 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         val contextInfo = contextDetector.detectContext(documentText, caretOffset)
         logger.info("检测到上下文: ${contextInfo.type}, 原因: ${contextInfo.reason}")
 
-        val contextChanged = lastContextInfo == null || contextInfo.type != lastContextInfo?.type
-        if (!contextChanged) {
-            logger.info("上下文无变化，跳过")
-            return
-        }
+        // 不再根据上下文类型提前返回，让 shouldSwitch 决定是否需要切换
 
-        lastContextInfo = contextInfo
         val targetMethod = determineInputMethod(contextInfo)
         logger.info("目标输入法: $targetMethod, 当前上下文: ${contextInfo.type}")
 
         // 使用 InputMethodManager 的内部状态与冷却判定
         val (should, reason) = InputMethodManager.shouldSwitch(targetMethod)
+        logger.info("shouldSwitch=$should, 原因: $reason")
+
         if (!should) {
             logger.info("shouldSwitch=false: $reason")
             return
@@ -136,56 +153,110 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
 
         logger.info("调用 InputMethodManager.switchTo($targetMethod)...")
         val settings = inputMethodService.getSettings()
-        val success = InputMethodManager.switchTo(targetMethod, settings)
+        logger.info("Settings: isEnabled=${settings.isEnabled}, isShowHints=${settings.isShowHints}")
+        val switchResult = InputMethodManager.switchTo(targetMethod, settings)
         val elapsed = System.currentTimeMillis() - startTs
-        logger.info("switchTo 返回: $success, 耗时: ${elapsed}ms")
+        logger.info("switchTo 返回: success=${switchResult.success}, 消息: ${switchResult.message}, 耗时: ${elapsed}ms, actualMethod=${switchResult.actualMethod}")
 
-        // 显示 Toast 提示
-        val editor = FileEditorManager.getInstance(project).selectedTextEditor
-        if (editor != null && success) {
-            val toastMessage = generateToastMessage(contextInfo, targetMethod, fileName)
-            val isChinese = targetMethod == InputMethodType.CHINESE
-            ToastManager.showToast(editor, toastMessage, isChinese)
+        // 显示 Toast 提示 - 根据实际切换结果显示
+        if (settings.isShowHints) {
+            ApplicationManager.getApplication().invokeLater {
+                val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                logger.info("准备显示 Toast: activeEditor=${activeEditor != null}, switchResult.success=${switchResult.success}")
+                if (activeEditor != null) {
+                    if (switchResult.success) {
+                        // 切换成功，根据实际切换后的输入法显示Toast
+                        val toastMessage = generateToastMessage(contextInfo, switchResult.actualMethod, fileName, switchResult.message)
+                        val isChinese = switchResult.actualMethod == InputMethodType.CHINESE
+                        ToastManager.showToast(activeEditor, toastMessage, isChinese)
+                        logger.info("触发 Toast 显示: $toastMessage (actualMethod=${switchResult.actualMethod})")
+                    } else {
+                        // 切换失败，显示详细失败原因
+                        val failureMessage = when {
+                            switchResult.message.contains("不支持") -> "输入法切换失败：不支持当前操作系统"
+                            switchResult.message.contains("权限") -> "输入法切换失败：缺少系统权限"
+                            switchResult.message.contains("冷却中") -> "输入法切换失败：切换过于频繁"
+                            else -> "输入法切换失败：${switchResult.message}"
+                        }
+                        ToastManager.showToast(activeEditor, failureMessage, false)
+                        logger.info("触发 Toast 显示: $failureMessage")
+                    }
+                } else {
+                    logger.info("未显示 Toast: 活跃编辑器为null")
+                }
+            }
         }
+
+        lastContextInfo = contextInfo
     }
 
     /**
-     * 根据上下文和目标输入法生成提示消息
+     * 根据上下文和实际输入法生成提示消息
      */
     private fun generateToastMessage(
         contextInfo: ContextInfo,
-        targetMethod: InputMethodType,
-        fileName: String
+        actualMethod: InputMethodType,
+        fileName: String,
+        switchMessage: String
     ): String {
-        return when (targetMethod) {
+        logger.info("=== generateToastMessage 被调用 ===")
+        logger.info("actualMethod: $actualMethod")
+        logger.info("contextInfo.type: ${contextInfo.type}")
+        logger.info("switchMessage: $switchMessage")
+
+        return when (actualMethod) {
             InputMethodType.CHINESE -> {
                 when (contextInfo.type) {
-                    ContextType.COMMENT -> "中文文字之间自动切换为中文"
-                    ContextType.STRING -> contextInfo.reason
-                    else -> "已切换为中文"
+                    ContextType.CODE -> {
+                        // 如果切换消息表明已经是当前输入法，显示简单消息
+                        if (switchMessage.contains("无需切换") || switchMessage.contains("冷却中")) {
+                            "保持中文输入法"
+                        } else {
+                            "已切换为中文"
+                        }
+                    }
+                    ContextType.COMMENT -> "注释区域自动切换为中文"
+                    ContextType.STRING -> "字符串区域自动切换为中文"
+                    ContextType.UNKNOWN -> "已切换为中文"
                 }
             }
             InputMethodType.ENGLISH -> {
                 // 根据文件类型生成消息
                 val fileType = getFileType(fileName)
-                when (contextInfo.type) {
-                    ContextType.DEFAULT -> {
-                        when (fileType) {
-                            FileType.JAVA -> "Java 文件默认切换为英文"
-                            FileType.KOTLIN -> "Kotlin 文件默认切换为英文"
-                            FileType.PYTHON -> "Python 文件默认切换为英文"
-                            FileType.GO -> "Go 文件默认切换为英文"
-                            FileType.JAVASCRIPT -> "JavaScript 文件默认切换为英文"
-                            FileType.TYPESCRIPT -> "TypeScript 文件默认切换为英文"
-                            FileType.C_CPP -> "C/C++ 文件默认切换为英文"
-                            FileType.OTHER -> "代码区域切换为英文"
-                        }
-                    }
+                 when (contextInfo.type) {
+                     ContextType.CODE -> {
+                         // 如果切换消息表明已经是当前输入法，显示简单消息
+                         if (switchMessage.contains("无需切换") || switchMessage.contains("冷却中")) {
+                             "保持英文输入法"
+                         } else {
+                             when (fileType) {
+                                 FileType.JAVA -> "Java 文件已切换为英文"
+                                 FileType.KOTLIN -> "Kotlin 文件已切换为英文"
+                                 FileType.PYTHON -> "Python 文件已切换为英文"
+                                 FileType.GO -> "Go 文件已切换为英文"
+                                 FileType.JAVASCRIPT -> "JavaScript 文件已切换为英文"
+                                 FileType.TYPESCRIPT -> "TypeScript 文件已切换为英文"
+                                 FileType.C_CPP -> "C/C++ 文件已切换为英文"
+                                 FileType.OTHER -> "代码区域已切换为英文"
+                             }
+                         }
+                     }
                     ContextType.STRING -> {
                         // 英文字符串保持英文
-                        "字符串区域保持英文"
+                        if (switchMessage.contains("无需切换") || switchMessage.contains("冷却中")) {
+                            "保持英文输入法"
+                        } else {
+                            "字符串区域已切换为英文"
+                        }
                     }
-                    else -> "已切换为英文"
+                    ContextType.COMMENT -> {
+                        if (switchMessage.contains("无需切换") || switchMessage.contains("冷却中")) {
+                            "保持英文输入法"
+                        } else {
+                            "注释区域已切换为英文"
+                        }
+                    }
+                    ContextType.UNKNOWN -> "已切换为英文"
                 }
             }
             else -> ""
@@ -221,7 +292,7 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     private fun determineInputMethod(contextInfo: ContextInfo): InputMethodType {
         val settings = inputMethodService.getSettings()
         return when (contextInfo.type) {
-            ContextType.DEFAULT -> settings.defaultMethod
+            ContextType.CODE -> settings.defaultMethod
             ContextType.COMMENT -> settings.commentMethod
             ContextType.STRING -> settings.commentMethod
             ContextType.UNKNOWN -> settings.defaultMethod
