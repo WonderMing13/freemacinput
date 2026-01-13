@@ -263,6 +263,28 @@ object InputMethodManager {
     }
 
     /**
+     * 获取当前输入法类型
+     * 用于监听用户主动切换输入法的行为
+     */
+    fun getCurrentInputMethod(): InputMethodType {
+        val currentIM = detectCurrentInputMethod()
+        
+        return when {
+            currentIM == "unknown" -> InputMethodType.UNKNOWN
+            isChineseInputMethod(currentIM) -> InputMethodType.CHINESE
+            else -> InputMethodType.ENGLISH
+        }
+    }
+
+    /**
+     * 获取当前输入法的完整ID/名称
+     * 用于离开IDE场景的输入法恢复
+     */
+    fun getCurrentInputMethodName(): String {
+        return detectCurrentInputMethod()
+    }
+
+    /**
      * 检测当前输入法
      */
     private fun detectCurrentInputMethod(): String {
@@ -445,10 +467,4 @@ object InputMethodManager {
         logger.info("手动设置当前输入法: $method")
     }
 
-    /**
-     * 获取当前输入法名称（用于调试）
-     */
-    fun getCurrentInputMethodName(): String {
-        return detectCurrentInputMethod()
-    }
 }

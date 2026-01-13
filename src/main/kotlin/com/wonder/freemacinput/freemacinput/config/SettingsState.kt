@@ -4,13 +4,11 @@ import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
+import com.intellij.util.xmlb.XmlSerializerUtil
 import com.wonder.freemacinput.freemacinput.core.InputMethodType
 
 /**
  * 插件设置状态
- * 用于持久化保存用户的配置
- *
- * 使用 Application Service 模式，全局单例
  */
 @Service(Service.Level.APP)
 @State(
@@ -19,30 +17,104 @@ import com.wonder.freemacinput.freemacinput.core.InputMethodType
 )
 class SettingsState : PersistentStateComponent<SettingsState> {
 
-    // ============ 启用控制 ============
+    // 启用控制
     var isEnabled: Boolean = true
     var isShowHints: Boolean = true
     var isEnableCaretColor: Boolean = true
 
-    // ============ 各场景默认输入法 ============
+    // 各场景默认输入法
     var defaultMethod: InputMethodType = InputMethodType.ENGLISH
     var commentMethod: InputMethodType = InputMethodType.CHINESE
+    var stringMethod: InputMethodType = InputMethodType.CHINESE
 
-    /**
-     * 保存当前状态
-     */
+    // 默认场景配置（文件类型规则）
+    var fileTypeRules: MutableList<FileTypeRule> = mutableListOf()
+
+    // 注释场景配置
+    var showCommentSceneHint: Boolean = true
+
+    // 字符串场景配置
+    var stringSceneRules: MutableList<StringSceneRule> = mutableListOf()
+    var stringSceneHabits: MutableList<StringSceneHabit> = mutableListOf()
+    var enableStringRescue: Boolean = true
+
+    // 离开IDE场景配置（仅macOS）
+    var leaveIDEStrategy: LeaveIDEStrategy = LeaveIDEStrategy.RESTORE_PREVIOUS
+    var inputMethodBeforeEnterIDE: String? = null
+
     override fun getState(): SettingsState = this
 
-    /**
-     * 加载保存的状态
-     */
     override fun loadState(state: SettingsState) {
-        this.isEnabled = state.isEnabled
-        this.isShowHints = state.isShowHints
-        this.isEnableCaretColor = state.isEnableCaretColor
-        this.defaultMethod = state.defaultMethod
-        this.commentMethod = state.commentMethod
+        XmlSerializerUtil.copyBean(state, this)
+    }
+
+    /**
+     * 根据文件类型获取默认输入法
+     */
+    fun getInputMethodForFileType(fileType: String): InputMethodType {
+        val rule = fileTypeRules.find { 
+            it.enabled && it.fileType.equals(fileType, ignoreCase = true) 
+        }
+        return rule?.defaultInputMethod ?: defaultMethod
+    }
+
+    /**
+     * 根据语言和表达式获取字符串场景的输入法
+     * 返回 null 表示没有配置，不应该自动切换
+     */
+    fun getInputMethodForString(language: String, expression: String): InputMethodType? {
+        // 1. 查找用户习惯（最高优先级）
+        val habit = stringSceneHabits.find {
+            it.language.equals(language, ignoreCase = true) && 
+            matchExpression(it.expression, expression)
+        }
+        if (habit != null) {
+            return habit.preferredInputMethod
+        }
+
+        // 2. 查找手动配置的规则
+        val rule = stringSceneRules.find {
+            it.language.equals(language, ignoreCase = true) && 
+            matchExpression(it.expression, expression)
+        }
+        if (rule != null) {
+            return rule.defaultInputMethod
+        }
+
+        // 3. 没有配置，返回 null（不自动切换）
+        return null
+    }
+
+    /**
+     * 记录用户在字符串场景的输入法习惯
+     */
+    fun recordStringSceneHabit(language: String, expression: String, inputMethod: InputMethodType) {
+        val existing = stringSceneHabits.find {
+            it.language.equals(language, ignoreCase = true) && 
+            it.expression.equals(expression, ignoreCase = true)
+        }
+
+        if (existing != null) {
+            existing.preferredInputMethod = inputMethod
+            existing.recordTime = System.currentTimeMillis()
+        } else {
+            stringSceneHabits.add(StringSceneHabit(
+                language = language,
+                expression = expression,
+                preferredInputMethod = inputMethod,
+                recordTime = System.currentTimeMillis()
+            ))
+        }
+    }
+
+    /**
+     * 匹配表达式
+     */
+    private fun matchExpression(pattern: String, expression: String): Boolean {
+        if (pattern == "*") return true
+        if (pattern == expression) return true
+        
+        val regex = pattern.replace("*", ".*").toRegex(RegexOption.IGNORE_CASE)
+        return regex.matches(expression)
     }
 }
-
-

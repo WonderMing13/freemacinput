@@ -19,6 +19,7 @@ import com.intellij.util.messages.MessageBusConnection
 import com.wonder.freemacinput.freemacinput.core.InputMethodManager
 
 import com.wonder.freemacinput.freemacinput.listener.EditorEventListener
+import com.wonder.freemacinput.freemacinput.listener.IDEFocusListener
 import com.wonder.freemacinput.freemacinput.service.InputMethodService
 import com.wonder.freemacinput.freemacinput.ui.ToastManager
 
@@ -31,6 +32,7 @@ class StartupActivity : IJStartupActivity, DumbAware {
 
     private val registeredEditors = mutableSetOf<Long>()
     private var editorListener: EditorEventListener? = null
+    private var ideFocusListener: IDEFocusListener? = null
     private var connection: MessageBusConnection? = null
 
     init {
@@ -90,6 +92,10 @@ class StartupActivity : IJStartupActivity, DumbAware {
             editorListener = EditorEventListener(project)
             // 创建持久化的事件总线连接
             connection = project.messageBus.connect(project)
+            
+            // 创建并注册 IDE 焦点监听器（仅 macOS）
+            ideFocusListener = IDEFocusListener(project)
+            ideFocusListener?.register()
 
             // 注册编辑器工厂事件监听
             EditorFactory.getInstance().addEditorFactoryListener(object : EditorFactoryListener {

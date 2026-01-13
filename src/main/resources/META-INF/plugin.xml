@@ -7,7 +7,32 @@
     <change-notes><![CDATA[Initial release with smart context detection for input method switching.]]></change-notes>
     <depends>com.intellij.modules.platform</depends>
     <extensions defaultExtensionNs="com.intellij">
-        <applicationConfigurable instance="com.wonder.freemacinput.freemacinput.config.SettingsConfigurable"/>
+        <!-- 主配置页面 -->
+        <applicationConfigurable 
+            parentId="tools" 
+            id="FreeMacInput" 
+            displayName="FreeMacInput"
+            instance="com.wonder.freemacinput.freemacinput.config.CommonSettingsConfigurable"/>
+        
+        <!-- 子配置页面 -->
+        <applicationConfigurable 
+            parentId="FreeMacInput" 
+            id="FreeMacInput.DefaultScene" 
+            displayName="默认场景"
+            instance="com.wonder.freemacinput.freemacinput.config.DefaultSceneConfigurable"/>
+        
+        <applicationConfigurable 
+            parentId="FreeMacInput" 
+            id="FreeMacInput.CommentScene" 
+            displayName="注释场景"
+            instance="com.wonder.freemacinput.freemacinput.config.CommentSceneConfigurable"/>
+        
+        <applicationConfigurable 
+            parentId="FreeMacInput" 
+            id="FreeMacInput.StringScene" 
+            displayName="字符串场景"
+            instance="com.wonder.freemacinput.freemacinput.config.StringSceneConfigurable"/>
+        
         <applicationService serviceImplementation="com.wonder.freemacinput.freemacinput.config.SettingsState"/>
         <postStartupActivity implementation="com.wonder.freemacinput.freemacinput.StartupActivity"/>
     </extensions>

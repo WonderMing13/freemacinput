@@ -42,8 +42,9 @@ object ToastManager {
      * @param editor 编辑器实例
      * @param message 显示的消息
      * @param isChinese 是否为中文模式（影响颜色）
+     * @param durationMs 显示时长（毫秒），默认1200ms
      */
-    fun showToast(editor: Editor, message: String, isChinese: Boolean) {
+    fun showToast(editor: Editor, message: String, isChinese: Boolean, durationMs: Long = TOAST_DURATION_MS) {
         logger.info("=== Toast 开始显示 ===")
         logger.info("消息: $message")
         logger.info("是否中文: $isChinese")
@@ -145,7 +146,7 @@ object ToastManager {
                         logger.info("定时器触发，关闭 Toast")
                         dismissToast(editor)
                     }
-                }, TOAST_DURATION_MS, TimeUnit.MILLISECONDS)
+                }, durationMs, TimeUnit.MILLISECONDS)
 
                 logger.info("✅ Toast 显示成功: $message")
                 logger.info("✅ Toast 颜色: ${if (isChinese) "中文(蓝)" else "英文(绿)"}")

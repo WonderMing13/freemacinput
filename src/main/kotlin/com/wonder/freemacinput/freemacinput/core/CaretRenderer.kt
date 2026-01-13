@@ -35,6 +35,7 @@ enum class CaretColorTheme(
                 InputMethodType.ENGLISH -> ENGLISH
                 InputMethodType.CHINESE -> CHINESE
                 InputMethodType.AUTO -> UNKNOWN
+                InputMethodType.UNKNOWN -> UNKNOWN
             }
         }
     }

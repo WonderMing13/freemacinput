@@ -12,6 +12,7 @@ import com.wonder.freemacinput.freemacinput.core.*
 import com.wonder.freemacinput.freemacinput.core.InputMethodManager
 import com.wonder.freemacinput.freemacinput.service.InputMethodService
 import com.wonder.freemacinput.freemacinput.ui.ToastManager
+import com.wonder.freemacinput.freemacinput.ui.CommentSceneHintManager
 import com.intellij.openapi.application.ApplicationManager
 
 import java.util.Timer
@@ -34,6 +35,21 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     // 缓存文档文本，避免频繁获取
     private var cachedDocumentText: String? = null
     private var cachedDocumentLength: Int = -1
+    
+    // 字符串场景状态管理
+    private var inStringScene = false
+    private var stringSceneVariableName: String? = null
+    private var stringSceneLanguage: String? = null
+    private var stringSceneInputMethod: InputMethodType? = null
+    private var stringSceneSwitched = false  // 记录是否已经切换过输入法
+    
+    // 用户手动切换监听定时器
+    private var userSwitchMonitorTimer: Timer? = null
+    private var userSwitchMonitorTask: TimerTask? = null
+    
+    // 补救功能状态管理
+    private var rescueInProgress = false
+    private var rescueEndTime = 0L
 
     fun onEditorActivated(editor: Editor) {
         logger.info("onEditorActivated called")
@@ -84,11 +100,53 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
 
     override fun documentChanged(event: DocumentEvent) {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
+        
+        // 检查是否输入了注释标记
+        val settings = inputMethodService.getSettings()
+        if (settings.showCommentSceneHint) {
+            checkAndShowCommentHint(editor, event)
+        }
+        
+        // 记录字符串场景的输入（用于补救功能）
+        if (settings.enableStringRescue && event.newLength > 0) {
+            val offset = event.offset
+            StringInputRescue.recordInput(editor, event.newFragment.toString(), offset)
+        }
+        
         // 文档变化时清除缓存
         cachedDocumentText = null
         cachedDocumentLength = -1
         val data = extractEditorData(editor)
         scheduleInputMethodSwitch(data.fileName, data.documentText, data.caretOffset, 120L)
+    }
+    
+    /**
+     * 检查并显示注释场景提示
+     */
+    private fun checkAndShowCommentHint(editor: Editor, event: DocumentEvent) {
+        try {
+            val document = editor.document
+            val offset = event.offset + event.newLength
+            
+            // 确保有足够的字符
+            if (offset < 2) return
+            
+            val text = document.text
+            if (offset > text.length) return
+            
+            // 检查光标前的两个字符
+            val beforeCursor = text.substring(maxOf(0, offset - 2), offset)
+            
+            // 检查是否刚输入了 // 或 /*
+            if (beforeCursor == "//" || beforeCursor == "/*") {
+                ApplicationManager.getApplication().invokeLater {
+                    ToastManager.showToast(editor, "注释场景", true, 2000)
+                    logger.info("显示注释场景提示: $beforeCursor")
+                }
+            }
+        } catch (e: Exception) {
+            logger.error("显示注释场景提示失败", e)
+        }
     }
 
     override fun beforeDocumentChange(event: DocumentEvent) {}
@@ -132,46 +190,81 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
             return
         }
 
-        logger.info("开始检测上下文... file=$fileName")
+        logger.info("========== 开始检测上下文 ==========")
+        logger.info("文件: $fileName, 光标位置: $caretOffset")
 
-        val contextInfo = contextDetector.detectContext(documentText, caretOffset)
-        logger.info("检测到上下文: ${contextInfo.type}, 原因: ${contextInfo.reason}")
+        val contextInfo = contextDetector.detectContext(documentText, caretOffset, fileName)
+        logger.info("✅ 检测结果: 类型=${contextInfo.type}, 原因=${contextInfo.reason}")
+        if (contextInfo.variableName != null) {
+            logger.info("   变量名: ${contextInfo.variableName}, 语言: ${contextInfo.language}")
+        }
 
-        // 不再根据上下文类型提前返回，让 shouldSwitch 决定是否需要切换
+        // 字符串场景特殊处理
+        if (contextInfo.type == ContextType.STRING) {
+            handleStringScene(contextInfo, fileName)
+            lastContextInfo = contextInfo
+            logger.info("========== 检测结束（字符串场景）==========\n")
+            return
+        } else {
+            // 离开字符串场景，清除状态
+            if (inStringScene) {
+                logger.info("🚪 离开字符串场景")
+                stopContinuousMonitoring()  // 停止监听
+                inStringScene = false
+                stringSceneVariableName = null
+                stringSceneLanguage = null
+                stringSceneInputMethod = null
+                stringSceneSwitched = false  // 重置切换标记
+            }
+        }
 
-        val targetMethod = determineInputMethod(contextInfo)
-        logger.info("目标输入法: $targetMethod, 当前上下文: ${contextInfo.type}")
+        val targetMethod = determineInputMethod(contextInfo, fileName)
+        logger.info("🎯 目标输入法: $targetMethod")
+
+        // 获取当前实际输入法（用于补救功能）
+        val currentMethod = InputMethodManager.getCurrentInputMethod()
+        logger.info("📱 当前输入法: $currentMethod")
 
         // 使用 InputMethodManager 的内部状态与冷却判定
         val (should, reason) = InputMethodManager.shouldSwitch(targetMethod)
-        logger.info("shouldSwitch=$should, 原因: $reason")
+        logger.info("🔄 是否需要切换: $should, 原因: $reason")
 
         if (!should) {
-            logger.info("shouldSwitch=false: $reason")
+            logger.info("========== 检测结束（无需切换）==========\n")
+            lastContextInfo = contextInfo
             return
         }
 
-        logger.info("调用 InputMethodManager.switchTo($targetMethod)...")
+        logger.info("⚡ 开始切换输入法...")
         val settings = inputMethodService.getSettings()
-        logger.info("Settings: isEnabled=${settings.isEnabled}, isShowHints=${settings.isShowHints}")
         val switchResult = InputMethodManager.switchTo(targetMethod, settings)
         val elapsed = System.currentTimeMillis() - startTs
-        logger.info("switchTo 返回: success=${switchResult.success}, 消息: ${switchResult.message}, 耗时: ${elapsed}ms, actualMethod=${switchResult.actualMethod}")
+        logger.info("✅ 切换结果: success=${switchResult.success}, 实际输入法=${switchResult.actualMethod}, 耗时=${elapsed}ms")
+        logger.info("========== 检测结束 ==========\n")
+
+        // 补救功能：从英文切换到中文时
+        if (switchResult.success && 
+            settings.enableStringRescue && 
+            contextInfo.type == ContextType.STRING &&
+            currentMethod == InputMethodType.ENGLISH && 
+            switchResult.actualMethod == InputMethodType.CHINESE) {
+            
+            val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+            if (activeEditor != null) {
+                StringInputRescue.rescueInput(activeEditor, project, currentMethod, switchResult.actualMethod)
+            }
+        }
 
         // 显示 Toast 提示 - 根据实际切换结果显示
         if (settings.isShowHints) {
             ApplicationManager.getApplication().invokeLater {
                 val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
-                logger.info("准备显示 Toast: activeEditor=${activeEditor != null}, switchResult.success=${switchResult.success}")
                 if (activeEditor != null) {
                     if (switchResult.success) {
-                        // 切换成功，根据实际切换后的输入法显示Toast
                         val toastMessage = generateToastMessage(contextInfo, switchResult.actualMethod, fileName, switchResult.message)
                         val isChinese = switchResult.actualMethod == InputMethodType.CHINESE
                         ToastManager.showToast(activeEditor, toastMessage, isChinese)
-                        logger.info("触发 Toast 显示: $toastMessage (actualMethod=${switchResult.actualMethod})")
                     } else {
-                        // 切换失败，显示详细失败原因
                         val failureMessage = when {
                             switchResult.message.contains("不支持") -> "输入法切换失败：不支持当前操作系统"
                             switchResult.message.contains("权限") -> "输入法切换失败：缺少系统权限"
@@ -179,15 +272,311 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
                             else -> "输入法切换失败：${switchResult.message}"
                         }
                         ToastManager.showToast(activeEditor, failureMessage, false)
-                        logger.info("触发 Toast 显示: $failureMessage")
                     }
-                } else {
-                    logger.info("未显示 Toast: 活跃编辑器为null")
                 }
             }
         }
 
         lastContextInfo = contextInfo
+    }
+    
+    /**
+     * 处理字符串场景
+     * 字符串场景有独立的状态管理，一旦进入就保持，直到离开
+     */
+    private fun handleStringScene(contextInfo: ContextInfo, fileName: String) {
+        val settings = inputMethodService.getSettings()
+        val variableName = contextInfo.variableName
+        val language = contextInfo.language
+        
+        // 检查是否是新的字符串场景
+        val isNewStringScene = !inStringScene || 
+                                stringSceneVariableName != variableName || 
+                                stringSceneLanguage != language
+        
+        if (isNewStringScene) {
+            logger.info("🎯 进入新的字符串场景: $language.$variableName")
+            inStringScene = true
+            stringSceneVariableName = variableName
+            stringSceneLanguage = language
+            stringSceneSwitched = false  // 重置切换标记
+            
+            // 确定字符串场景的输入法
+            val targetMethod = if (variableName != null && language != null) {
+                // 查找配置的规则或习惯
+                val configuredMethod = settings.getInputMethodForString(language, variableName)
+                if (configuredMethod != null) {
+                    logger.info("   找到配置: $language.$variableName -> $configuredMethod")
+                    configuredMethod
+                } else {
+                    // 没有配置，使用字符串场景的默认输入法
+                    logger.info("   没有配置，使用字符串场景默认输入法: ${settings.stringMethod}")
+                    settings.stringMethod
+                }
+            } else {
+                // 无法提取变量名，使用默认
+                settings.stringMethod
+            }
+            
+            // 记录是否使用了默认输入法（用于显示提示）
+            val isUsingDefault = variableName != null && language != null && 
+                                 settings.getInputMethodForString(language, variableName) == null
+            
+            logger.info("   是否使用默认输入法: $isUsingDefault")
+            
+            stringSceneInputMethod = targetMethod
+            logger.info("   字符串场景输入法: $targetMethod")
+            
+            // 切换到字符串场景的输入法（只在第一次进入时切换）
+            val currentMethod = InputMethodManager.getCurrentInputMethod()
+            if (currentMethod != targetMethod && !stringSceneSwitched) {
+                logger.info("   需要切换: $currentMethod -> $targetMethod")
+                val switchResult = InputMethodManager.switchTo(targetMethod, settings)
+                logger.info("   切换结果: ${switchResult.success}, 实际: ${switchResult.actualMethod}")
+                stringSceneSwitched = true  // 标记已切换
+                
+                // 补救功能
+                if (switchResult.success && 
+                    settings.enableStringRescue && 
+                    currentMethod == InputMethodType.ENGLISH && 
+                    switchResult.actualMethod == InputMethodType.CHINESE) {
+                    
+                    val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                    if (activeEditor != null) {
+                        StringInputRescue.rescueInput(activeEditor, project, currentMethod, switchResult.actualMethod)
+                    }
+                }
+            } else {
+                logger.info("   当前已是目标输入法，无需切换")
+            }
+            
+            // 启动持续监听用户手动切换（无论是否有配置都监听）
+            if (variableName != null && language != null) {
+                logger.info("   💡 启动持续监听用户手动切换")
+                startContinuousMonitoring(language, variableName)
+            }
+            
+            // 显示提示（无论是否切换都显示）
+            if (settings.isShowHints) {
+                ApplicationManager.getApplication().invokeLater {
+                    val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                    if (activeEditor != null) {
+                        val message = if (isUsingDefault) {
+                            // 使用默认输入法时显示特殊提示
+                            logger.info("   📢 显示提示: 字符串区域默认输入法")
+                            "字符串区域默认输入法"
+                        } else if (variableName != null) {
+                            logger.info("   📢 显示提示: 字符串场景: $variableName")
+                            "字符串场景: $variableName → ${if (targetMethod == InputMethodType.CHINESE) "中文" else "英文"}"
+                        } else {
+                            logger.info("   📢 显示提示: 字符串区域")
+                            "字符串区域 → ${if (targetMethod == InputMethodType.CHINESE) "中文" else "英文"}"
+                        }
+                        ToastManager.showToast(activeEditor, message, targetMethod == InputMethodType.CHINESE)
+                    }
+                }
+            }
+        } else {
+            logger.info("📍 保持在字符串场景: $language.$variableName (输入法: $stringSceneInputMethod)")
+            // 在同一个字符串场景内，不做任何自动切换
+        }
+    }
+    
+    /**
+     * 开始持续监听用户在字符串场景中的手动切换
+     * 使用定时器每 200ms 检查一次
+     */
+    private fun startContinuousMonitoring(language: String, variableName: String) {
+        // 先停止之前的监听
+        stopContinuousMonitoring()
+        
+        val expectedMethod = stringSceneInputMethod ?: return
+        logger.info("🔍 开始持续监听用户手动切换: $language.$variableName, 预期输入法: $expectedMethod")
+        
+        userSwitchMonitorTimer = Timer("StringSceneMonitor", true)
+        userSwitchMonitorTask = object : TimerTask() {
+            override fun run() {
+                // 检查是否还在字符串场景中
+                if (!inStringScene || 
+                    stringSceneLanguage != language || 
+                    stringSceneVariableName != variableName) {
+                    logger.info("⏸️ 已离开字符串场景，停止监听")
+                    stopContinuousMonitoring()
+                    return
+                }
+                
+                val currentMethod = InputMethodManager.getCurrentInputMethod()
+                val expectedNow = stringSceneInputMethod
+                
+                // 如果当前输入法与预期不同，说明用户手动切换了
+                if (expectedNow != null && 
+                    currentMethod != expectedNow && 
+                    currentMethod != InputMethodType.UNKNOWN) {
+                    
+                    logger.info("🔧 检测到用户手动切换: $expectedNow -> $currentMethod")
+                    
+                    // 更新字符串场景的输入法
+                    stringSceneInputMethod = currentMethod
+                    
+                    // 记录习惯
+                    val settings = inputMethodService.getSettings()
+                    val existingHabit = settings.stringSceneHabits.find {
+                        it.language.equals(language, ignoreCase = true) && 
+                        it.expression.equals(variableName, ignoreCase = true)
+                    }
+                    
+                    if (existingHabit == null || existingHabit.preferredInputMethod != currentMethod) {
+                        settings.recordStringSceneHabit(language, variableName, currentMethod)
+                        logger.info("✅ 自动记录习惯: $language.$variableName -> $currentMethod")
+                    }
+                    
+                    // 触发补救功能
+                    if (settings.enableStringRescue && 
+                        expectedNow == InputMethodType.ENGLISH && 
+                        currentMethod == InputMethodType.CHINESE) {
+                        
+                        ApplicationManager.getApplication().invokeLater {
+                            val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                            if (activeEditor != null) {
+                                logger.info("🔧 触发补救功能: 删除英文拼音")
+                                StringInputRescue.rescueInput(activeEditor, project, expectedNow, currentMethod)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 每 200ms 检查一次
+        userSwitchMonitorTimer?.schedule(userSwitchMonitorTask, 200L, 200L)
+    }
+    
+    /**
+     * 停止持续监听
+     */
+    private fun stopContinuousMonitoring() {
+        userSwitchMonitorTask?.cancel()
+        userSwitchMonitorTask = null
+        userSwitchMonitorTimer?.cancel()
+        userSwitchMonitorTimer = null
+    }
+    
+    /**
+     * 开始监听用户在字符串场景中的手动切换
+     */
+    private fun startMonitoringUserSwitch(language: String, variableName: String) {
+        // 记录进入字符串时的输入法
+        val initialMethod = stringSceneInputMethod ?: InputMethodManager.getCurrentInputMethod()
+        logger.info("🔍 开始监听用户手动切换: $language.$variableName, 初始输入法: $initialMethod")
+        
+        // 使用更短的延迟，多次检查
+        // 第一次检查：300ms
+        Timer().schedule(object : TimerTask() {
+            override fun run() {
+                checkAndHandleUserSwitch(language, variableName, initialMethod)
+            }
+        }, 300L)
+        
+        // 第二次检查：800ms
+        Timer().schedule(object : TimerTask() {
+            override fun run() {
+                checkAndHandleUserSwitch(language, variableName, initialMethod)
+            }
+        }, 800L)
+        
+        // 第三次检查：1500ms
+        Timer().schedule(object : TimerTask() {
+            override fun run() {
+                checkAndHandleUserSwitch(language, variableName, initialMethod)
+            }
+        }, 1500L)
+    }
+    
+    /**
+     * 检查用户是否手动切换了输入法（在保持字符串场景时调用）
+     */
+    private fun checkUserManualSwitch(language: String, variableName: String) {
+        val expectedMethod = stringSceneInputMethod ?: return
+        val currentMethod = InputMethodManager.getCurrentInputMethod()
+        
+        // 如果当前输入法与预期不同，说明用户手动切换了
+        if (currentMethod != expectedMethod && currentMethod != InputMethodType.UNKNOWN) {
+            logger.info("🔧 检测到用户手动切换: $expectedMethod -> $currentMethod")
+            
+            // 更新字符串场景的输入法
+            stringSceneInputMethod = currentMethod
+            
+            // 记录习惯
+            val settings = inputMethodService.getSettings()
+            val existingHabit = settings.stringSceneHabits.find {
+                it.language.equals(language, ignoreCase = true) && 
+                it.expression.equals(variableName, ignoreCase = true)
+            }
+            
+            if (existingHabit == null || existingHabit.preferredInputMethod != currentMethod) {
+                settings.recordStringSceneHabit(language, variableName, currentMethod)
+                logger.info("✅ 自动记录习惯: $language.$variableName -> $currentMethod")
+            }
+            
+            // 触发补救功能
+            if (settings.enableStringRescue && expectedMethod == InputMethodType.ENGLISH && currentMethod == InputMethodType.CHINESE) {
+                val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                if (activeEditor != null) {
+                    logger.info("🔧 触发补救功能: 删除英文拼音")
+                    StringInputRescue.rescueInput(activeEditor, project, expectedMethod, currentMethod)
+                }
+            }
+        }
+    }
+    
+    /**
+     * 检查并处理用户的手动切换
+     */
+    private fun checkAndHandleUserSwitch(language: String, variableName: String, initialMethod: InputMethodType) {
+        logger.info("🔍 检查用户手动切换: $language.$variableName, 初始输入法: $initialMethod")
+        
+        // 检查是否还在同一个字符串场景中
+        if (inStringScene && 
+            stringSceneLanguage == language && 
+            stringSceneVariableName == variableName) {
+            
+            val currentMethod = InputMethodManager.getCurrentInputMethod()
+            logger.info("   当前输入法: $currentMethod, 初始输入法: $initialMethod")
+            
+            if (currentMethod != initialMethod && currentMethod != InputMethodType.UNKNOWN) {
+                // 用户手动切换了输入法
+                logger.info("   ✅ 检测到用户手动切换: $initialMethod -> $currentMethod")
+                
+                // 检查是否已经记录过这个习惯
+                val settings = inputMethodService.getSettings()
+                val existingHabit = settings.stringSceneHabits.find {
+                    it.language.equals(language, ignoreCase = true) && 
+                    it.expression.equals(variableName, ignoreCase = true)
+                }
+                
+                if (existingHabit == null || existingHabit.preferredInputMethod != currentMethod) {
+                    // 记录习惯
+                    settings.recordStringSceneHabit(language, variableName, currentMethod)
+                    logger.info("✅ 自动记录习惯: $language.$variableName -> $currentMethod")
+                    
+                    // 更新当前字符串场景的输入法
+                    stringSceneInputMethod = currentMethod
+                }
+                
+                // 触发补救功能：清除不匹配的字符
+                if (settings.enableStringRescue) {
+                    val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                    if (activeEditor != null) {
+                        logger.info("🔧 用户手动切换，触发补救功能: $initialMethod -> $currentMethod")
+                        StringInputRescue.rescueInput(activeEditor, project, initialMethod, currentMethod)
+                    }
+                }
+            } else {
+                logger.info("   ⏸️ 输入法未变化或为 UNKNOWN，跳过")
+            }
+        } else {
+            logger.info("   ⏸️ 已离开字符串场景，跳过检查")
+        }
     }
 
     /**
@@ -289,17 +678,65 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         JAVA, KOTLIN, PYTHON, GO, JAVASCRIPT, TYPESCRIPT, C_CPP, OTHER
     }
 
-    private fun determineInputMethod(contextInfo: ContextInfo): InputMethodType {
+    private fun determineInputMethod(contextInfo: ContextInfo, fileName: String): InputMethodType {
         val settings = inputMethodService.getSettings()
         return when (contextInfo.type) {
-            ContextType.CODE -> settings.defaultMethod
+            ContextType.CODE -> {
+                // 优先使用文件类型规则
+                val fileExtension = fileName.substringAfterLast('.', "")
+                settings.getInputMethodForFileType(fileExtension)
+            }
             ContextType.COMMENT -> settings.commentMethod
-            ContextType.STRING -> settings.commentMethod
+            ContextType.STRING -> {
+                // 字符串场景：优先使用习惯记录，其次使用规则，最后使用默认
+                if (contextInfo.variableName != null && contextInfo.language != null) {
+                    settings.getInputMethodForString(contextInfo.language, contextInfo.variableName) ?: settings.stringMethod
+                } else {
+                    settings.stringMethod
+                }
+            }
             ContextType.UNKNOWN -> settings.defaultMethod
         }
     }
 
+    /**
+     * 记录字符串场景的输入法习惯
+     * 当用户进入字符串区域后主动切换输入法时，记录变量名和输入法的对应关系
+     */
+    private fun recordStringSceneHabit(contextInfo: ContextInfo, inputMethod: InputMethodType) {
+        val variableName = contextInfo.variableName ?: return
+        val language = contextInfo.language ?: return
+        
+        val settings = inputMethodService.getSettings()
+        settings.recordStringSceneHabit(language, variableName, inputMethod)
+        
+        logger.info("记录字符串场景习惯: $language.$variableName -> $inputMethod")
+    }
+
+    /**
+     * 监听字符串场景的输入法变化（用于记录用户主动切换的习惯）
+     * 当用户在字符串区域主动切换输入法时，记录这个习惯
+     */
+    private fun monitorStringSceneInputMethod(contextInfo: ContextInfo) {
+        // 获取当前实际的输入法
+        val currentMethod = InputMethodManager.getCurrentInputMethod()
+        if (currentMethod == InputMethodType.UNKNOWN) return
+        
+        val variableName = contextInfo.variableName ?: return
+        val language = contextInfo.language ?: return
+        
+        val settings = inputMethodService.getSettings()
+        val expectedMethod = settings.getInputMethodForString(language, variableName)
+        
+        // 如果当前输入法与预期不同，说明用户主动切换了，记录这个习惯
+        if (currentMethod != expectedMethod) {
+            settings.recordStringSceneHabit(language, variableName, currentMethod)
+            logger.info("检测到用户主动切换: $language.$variableName -> $currentMethod")
+        }
+    }
+
     fun dispose() {
+        stopContinuousMonitoring()  // 停止持续监听
         timer.cancel()
         CaretRendererManager.disposeAll()
         ToastManager.dismissAll()

@@ -18,9 +18,10 @@ class ContextDetector {
      *
      * @param documentText 文档文本
      * @param caretOffset 光标位置
+     * @param fileName 文件名（用于判断编程语言）
      * @return ContextInfo 包含检测到的场景类型和相关信息的对象
      */
-    fun detectContext(documentText: String, caretOffset: Int): ContextInfo {
+    fun detectContext(documentText: String, caretOffset: Int, fileName: String = ""): ContextInfo {
         return try {
             logger.info("detectContext: textLength=${documentText.length}, offset=$caretOffset")
 
@@ -34,13 +35,10 @@ class ContextDetector {
             val lineOffset = caretOffset - lineStartOffset
 
             // 检测字符串
-            val inString = detectStringContext(currentLine, lineOffset)
-            if (inString) {
-                logger.info("检测到字符串")
-                return ContextInfo(
-                    type = ContextType.STRING,
-                    reason = "字符串区域"
-                )
+            val stringContext = detectStringContextWithVariable(documentText, caretOffset, lineStartOffset, currentLine, lineOffset, fileName)
+            if (stringContext != null) {
+                logger.info("检测到字符串: 变量名=${stringContext.variableName}")
+                return stringContext
             }
 
             // 检测注释
@@ -69,7 +67,141 @@ class ContextDetector {
     }
 
     /**
-     * 检测字符串上下文
+     * 检测字符串上下文并提取变量名
+     *
+     * @param documentText 完整文档文本
+     * @param caretOffset 光标位置
+     * @param lineStartOffset 当前行起始位置
+     * @param currentLine 当前行文本
+     * @param lineOffset 光标在行内的偏移
+     * @param fileName 文件名
+     * @return ContextInfo 如果在字符串内则返回上下文信息，否则返回null
+     */
+    private fun detectStringContextWithVariable(
+        documentText: String,
+        caretOffset: Int,
+        lineStartOffset: Int,
+        currentLine: String,
+        lineOffset: Int,
+        fileName: String
+    ): ContextInfo? {
+        if (lineOffset < 0 || lineOffset > currentLine.length) {
+            return null
+        }
+
+        // 检查是否在字符串内
+        var inString = false
+        var stringType: Char? = null
+        var stringStartPos = -1
+        var escape = false
+
+        // 遍历到光标位置之前，判断是否在字符串内
+        // 注意：这里使用 until 而不是 .. ，因为我们要检查光标位置之前的状态
+        for (i in 0 until lineOffset) {
+            if (i >= currentLine.length) break
+            
+            val c = currentLine[i]
+            
+            if (escape) {
+                escape = false
+                continue
+            }
+
+            if (c == '\\') {
+                escape = true
+                continue
+            }
+
+            if (c == '"' || c == '\'') {
+                if (inString && c == stringType) {
+                    // 遇到闭合引号
+                    inString = false
+                    stringType = null
+                    stringStartPos = -1
+                } else if (!inString) {
+                    // 遇到开引号
+                    inString = true
+                    stringType = c
+                    stringStartPos = i
+                }
+            }
+        }
+
+        if (!inString) {
+            return null
+        }
+
+        // 提取变量名或函数名
+        val variableName = extractVariableOrFunctionName(currentLine, stringStartPos)
+        val language = getLanguageFromFileName(fileName)
+        
+        logger.info("字符串上下文: 变量名=$variableName, 语言=$language, 字符串起始位置=$stringStartPos, 光标位置=$lineOffset")
+        
+        return ContextInfo(
+            type = ContextType.STRING,
+            reason = "字符串区域",
+            variableName = variableName,
+            language = language
+        )
+    }
+
+    /**
+     * 从字符串位置向前提取变量名或函数名
+     * 
+     * 支持的模式：
+     * - String name = "..."  -> name
+     * - log.info("...")      -> info
+     * - setTitle("...")      -> setTitle
+     */
+    private fun extractVariableOrFunctionName(line: String, stringStartPos: Int): String? {
+        if (stringStartPos <= 0) return null
+        
+        // 获取字符串前的内容
+        val beforeString = line.substring(0, stringStartPos).trimEnd()
+        
+        // 模式1: 变量赋值 - String name = "..." 或 var name = "..."
+        val assignmentPattern = Regex("""(\w+)\s*=\s*$""")
+        val assignmentMatch = assignmentPattern.find(beforeString)
+        if (assignmentMatch != null) {
+            return assignmentMatch.groupValues[1]
+        }
+        
+        // 模式2: 函数调用 - log.info("...") 或 setTitle("...")
+        val functionPattern = Regex("""(\w+)\s*\($""")
+        val functionMatch = functionPattern.find(beforeString)
+        if (functionMatch != null) {
+            return functionMatch.groupValues[1]
+        }
+        
+        // 模式3: 方法链调用 - builder.append("...")
+        val methodPattern = Regex("""\.(\w+)\s*\($""")
+        val methodMatch = methodPattern.find(beforeString)
+        if (methodMatch != null) {
+            return methodMatch.groupValues[1]
+        }
+        
+        return null
+    }
+
+    /**
+     * 从文件名获取编程语言
+     */
+    private fun getLanguageFromFileName(fileName: String): String {
+        return when {
+            fileName.endsWith(".java", ignoreCase = true) -> "java"
+            fileName.endsWith(".kt", ignoreCase = true) -> "kotlin"
+            fileName.endsWith(".py", ignoreCase = true) -> "python"
+            fileName.endsWith(".js", ignoreCase = true) -> "javascript"
+            fileName.endsWith(".ts", ignoreCase = true) -> "typescript"
+            fileName.endsWith(".go", ignoreCase = true) -> "go"
+            fileName.endsWith(".c", ignoreCase = true) || 
+            fileName.endsWith(".cpp", ignoreCase = true) -> "cpp"
+            else -> "unknown"
+        }
+    }
+
+    /**
+     * 检测字符串上下文（简化版，仅用于兼容）
      *
      * @param currentLine 当前行文本
      * @param lineOffset 光标在行内的偏移
