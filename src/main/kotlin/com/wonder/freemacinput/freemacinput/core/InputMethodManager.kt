@@ -171,14 +171,27 @@ object InputMethodManager {
         // 方法1: 使用 im-select 精确切换（如果配置了 ID）
         if (targetId != null) {
             logger.info("使用 im-select 切换到: $targetId")
-            return executeCommand("im-select", targetId)
+            val success = executeCommand("im-select", targetId)
+            if (success) {
+                // 切换后等待足够长的时间，让系统完全完成切换
+                // macOS 的输入法切换是异步的，需要给系统足够的时间
+                Thread.sleep(200)
+                logger.info("输入法切换完成，已等待 200ms")
+            }
+            return success
         }
 
         // 方法2: 使用 im-select 自动检测切换
         logger.info("使用 im-select 自动检测切换")
-        return switchMacOSWithImSelectAuto(method == InputMethodType.CHINESE)
+        val success = switchMacOSWithImSelectAuto(method == InputMethodType.CHINESE)
+        if (success) {
+            // 切换后等待足够长的时间，让系统完全完成切换
+            Thread.sleep(200)
+            logger.info("输入法切换完成，已等待 200ms")
+        }
+        return success
     }
-
+    
     /**
      * 使用 im-select 自动检测并切换
      */

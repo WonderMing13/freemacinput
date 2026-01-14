@@ -7,6 +7,7 @@ import com.wonder.freemacinput.freemacinput.config.LeaveIDEStrategy
 import com.wonder.freemacinput.freemacinput.config.SettingsState
 import com.wonder.freemacinput.freemacinput.core.InputMethodManager
 import com.wonder.freemacinput.freemacinput.core.InputMethodType
+import com.wonder.freemacinput.freemacinput.core.GitCommitSceneManager
 import java.awt.KeyboardFocusManager
 import java.awt.Window
 import java.awt.event.WindowEvent
@@ -95,6 +96,12 @@ class IDEFocusListener(private val project: Project) : WindowFocusListener {
      */
     override fun windowLostFocus(e: WindowEvent?) {
         logger.info("IDE 窗口失去焦点")
+        
+        // 如果当前在 Git 提交场景中，不要切换
+        if (GitCommitSceneManager.isInGitCommitScene()) {
+            logger.info("当前在 Git 提交场景中，跳过离开IDE的输入法切换")
+            return
+        }
         
         val settings = getSettings()
         val strategy = settings.leaveIDEStrategy

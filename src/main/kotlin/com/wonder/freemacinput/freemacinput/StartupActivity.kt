@@ -20,6 +20,7 @@ import com.wonder.freemacinput.freemacinput.core.InputMethodManager
 
 import com.wonder.freemacinput.freemacinput.listener.EditorEventListener
 import com.wonder.freemacinput.freemacinput.listener.IDEFocusListener
+import com.wonder.freemacinput.freemacinput.listener.GitCommitListener
 import com.wonder.freemacinput.freemacinput.service.InputMethodService
 import com.wonder.freemacinput.freemacinput.ui.ToastManager
 
@@ -33,6 +34,7 @@ class StartupActivity : IJStartupActivity, DumbAware {
     private val registeredEditors = mutableSetOf<Long>()
     private var editorListener: EditorEventListener? = null
     private var ideFocusListener: IDEFocusListener? = null
+    private var gitCommitListener: GitCommitListener? = null
     private var connection: MessageBusConnection? = null
 
     init {
@@ -96,6 +98,10 @@ class StartupActivity : IJStartupActivity, DumbAware {
             // 创建并注册 IDE 焦点监听器（仅 macOS）
             ideFocusListener = IDEFocusListener(project)
             ideFocusListener?.register()
+            
+            // 创建并注册 Git 提交场景监听器
+            gitCommitListener = GitCommitListener(project)
+            gitCommitListener?.register()
 
             // 注册编辑器工厂事件监听
             EditorFactory.getInstance().addEditorFactoryListener(object : EditorFactoryListener {
@@ -103,14 +109,18 @@ class StartupActivity : IJStartupActivity, DumbAware {
                     val editor = event.editor ?: return
                     val editorId = System.identityHashCode(editor).toLong()
 
-                    if (registeredEditors.contains(editorId)) return
+                    if (registeredEditors.contains(editorId)) {
+                        logger.info("编辑器已注册，跳过: ${editor.virtualFile?.name ?: "untitled"}")
+                        return
+                    }
 
                     val fileName = editor.virtualFile?.name ?: "untitled"
                     logger.info("编辑器创建: $fileName")
                     registeredEditors.add(editorId)
 
-                    // 无论是否有virtualFile，都注册监听器
-                    registerListeners(editor, editorListener!!)
+                    // 为每个编辑器创建独立的监听器实例
+                    val editorSpecificListener = EditorEventListener(project)
+                    registerListeners(editor, editorSpecificListener)
                 }
 
                 override fun editorReleased(event: EditorFactoryEvent) {
@@ -120,6 +130,23 @@ class StartupActivity : IJStartupActivity, DumbAware {
                     }
                 }
             }, project)
+            
+            // 为已经打开的编辑器注册监听器
+            ApplicationManager.getApplication().invokeLater {
+                val allEditors = EditorFactory.getInstance().allEditors
+                logger.info("为 ${allEditors.size} 个已打开的编辑器注册监听器")
+                for (editor in allEditors) {
+                    val editorId = System.identityHashCode(editor).toLong()
+                    if (!registeredEditors.contains(editorId)) {
+                        val fileName = editor.virtualFile?.name ?: "untitled"
+                        logger.info("为已打开的编辑器注册监听器: $fileName")
+                        registeredEditors.add(editorId)
+                        // 为每个编辑器创建独立的监听器实例
+                        val editorSpecificListener = EditorEventListener(project)
+                        registerListeners(editor, editorSpecificListener)
+                    }
+                }
+            }
 
             // 注册文件切换监听
             connection?.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {

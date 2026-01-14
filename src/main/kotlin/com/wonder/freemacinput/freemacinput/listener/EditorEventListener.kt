@@ -10,6 +10,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.wonder.freemacinput.freemacinput.core.*
 import com.wonder.freemacinput.freemacinput.core.InputMethodManager
+import com.wonder.freemacinput.freemacinput.core.GitCommitSceneManager
 import com.wonder.freemacinput.freemacinput.service.InputMethodService
 import com.wonder.freemacinput.freemacinput.ui.ToastManager
 import com.wonder.freemacinput.freemacinput.ui.CommentSceneHintManager
@@ -187,6 +188,12 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         val startTs = System.currentTimeMillis()
         if (!inputMethodService.isEnabled()) {
             logger.info("插件未启用")
+            return
+        }
+        
+        // 如果当前在 Git 提交场景中，不要干扰
+        if (GitCommitSceneManager.isInGitCommitScene()) {
+            logger.info("当前在 Git 提交场景中，跳过自动切换")
             return
         }
 
