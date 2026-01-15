@@ -42,6 +42,15 @@ class SettingsState : PersistentStateComponent<SettingsState> {
     var leaveIDEStrategy: LeaveIDEStrategy = LeaveIDEStrategy.RESTORE_PREVIOUS
     var inputMethodBeforeEnterIDE: String? = null
 
+    // 工具窗口场景配置
+    var toolWindowRules: MutableList<ToolWindowRule> = mutableListOf()
+    
+    // 输入法切换方案配置
+    var switchStrategy: com.wonder.freemacinput.freemacinput.core.SwitchStrategy = 
+        com.wonder.freemacinput.freemacinput.core.SwitchStrategy.IM_SELECT
+    var chineseInputMethodId: String = "com.apple.inputmethod.SCIM.Pinyin"  // 简体拼音
+    var englishInputMethodId: String = "com.apple.keylayout.ABC"  // ABC
+
     override fun getState(): SettingsState = this
 
     override fun loadState(state: SettingsState) {

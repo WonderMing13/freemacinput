@@ -113,6 +113,13 @@ object InputMethodManager {
             return result
         }
 
+        // 从配置中获取输入法ID
+        if (settings != null) {
+            macChineseIMId = settings.chineseInputMethodId
+            macEnglishIMId = settings.englishInputMethodId
+            logger.info("使用配置的输入法ID: 中文=$macChineseIMId, 英文=$macEnglishIMId")
+        }
+
         // 冷却时间检查
         val now = System.currentTimeMillis()
         if (now - lastSwitchTime < SWITCH_COOLDOWN_MS && lastSwitchedTo == method) {
@@ -134,11 +141,36 @@ object InputMethodManager {
 
         logger.info("🎯 开始切换: $currentType → $method")
 
-        // 执行切换
-        val success = when {
-            isMacOS -> switchMacOS(method)
-            isWindows -> switchWindows(method)
-            else -> false
+        // 根据切换方案执行切换
+        val strategy = settings?.switchStrategy ?: SwitchStrategy.IM_SELECT
+        logger.info("使用切换方案: ${strategy.getDisplayName()}")
+
+        val success = when (strategy) {
+            SwitchStrategy.IM_SELECT -> {
+                when {
+                    isMacOS -> switchMacOS(method)
+                    isWindows -> switchWindows(method)
+                    else -> false
+                }
+            }
+            SwitchStrategy.STRATEGY_B -> {
+                logger.info("使用方案B：系统API切换")
+                if (isMacOS) {
+                    switchWithStrategyB(method)
+                } else {
+                    logger.warn("方案B仅支持 macOS")
+                    false
+                }
+            }
+            SwitchStrategy.STRATEGY_C -> {
+                logger.info("使用方案C：API识别 + 快捷键")
+                if (isMacOS) {
+                    switchWithStrategyC(method, settings)
+                } else {
+                    logger.warn("方案C仅支持 macOS")
+                    false
+                }
+            }
         }
 
         if (success) {
@@ -166,26 +198,25 @@ object InputMethodManager {
             return false
         }
 
+        // 获取目标输入法ID
         val targetId = if (method == InputMethodType.CHINESE) macChineseIMId else macEnglishIMId
 
-        // 方法1: 使用 im-select 精确切换（如果配置了 ID）
-        if (targetId != null) {
-            logger.info("使用 im-select 切换到: $targetId")
+        // 如果配置了具体的输入法ID，使用精确切换
+        if (targetId != null && targetId.isNotEmpty()) {
+            logger.info("使用配置的输入法ID切换到: $targetId")
             val success = executeCommand("im-select", targetId)
             if (success) {
                 // 切换后等待足够长的时间，让系统完全完成切换
-                // macOS 的输入法切换是异步的，需要给系统足够的时间
                 Thread.sleep(200)
                 logger.info("输入法切换完成，已等待 200ms")
             }
             return success
         }
 
-        // 方法2: 使用 im-select 自动检测切换
-        logger.info("使用 im-select 自动检测切换")
+        // 如果没有配置，使用自动检测切换
+        logger.info("未配置输入法ID，使用自动检测切换")
         val success = switchMacOSWithImSelectAuto(method == InputMethodType.CHINESE)
         if (success) {
-            // 切换后等待足够长的时间，让系统完全完成切换
             Thread.sleep(200)
             logger.info("输入法切换完成，已等待 200ms")
         }
@@ -479,5 +510,49 @@ object InputMethodManager {
         currentActualMethod = method
         logger.info("手动设置当前输入法: $method")
     }
+    
+    /**
+     * 方案B：使用系统API直接切换
+     */
+    private fun switchWithStrategyB(method: InputMethodType): Boolean {
+        val targetId = if (method == InputMethodType.CHINESE) macChineseIMId else macEnglishIMId
+        
+        if (targetId == null || targetId.isEmpty()) {
+            logger.error("方案B：未配置目标输入法ID")
+            return false
+        }
+        
+        return AdvancedInputMethodSwitcher.switchWithSystemAPI(targetId)
+    }
+    
+    /**
+     * 方案C：使用系统API识别 + 快捷键切换
+     */
+    private fun switchWithStrategyC(method: InputMethodType, settings: com.wonder.freemacinput.freemacinput.config.SettingsState?): Boolean {
+        // 首先检查当前输入法
+        val currentId = AdvancedInputMethodSwitcher.getCurrentInputMethodId()
+        if (currentId == null) {
+            logger.error("方案C：无法获取当前输入法")
+            return false
+        }
+        
+        val isChinese = AdvancedInputMethodSwitcher.isChineseInputMethod(currentId)
+        val currentType = if (isChinese) InputMethodType.CHINESE else InputMethodType.ENGLISH
+        
+        // 如果已经是目标输入法，不需要切换
+        if (currentType == method) {
+            logger.info("方案C：当前已是目标输入法")
+            return true
+        }
+        
+        // 使用快捷键切换
+        // 默认使用 Control+Space (keyCode 49)
+        // 用户可以在配置中自定义
+        val modifiers = listOf("control")
+        val keyCode = 49 // Space key
+        
+        return AdvancedInputMethodSwitcher.switchWithShortcut(modifiers, keyCode)
+    }
 
 }
+

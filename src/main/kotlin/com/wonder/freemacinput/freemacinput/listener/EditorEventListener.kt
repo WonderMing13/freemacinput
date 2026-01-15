@@ -191,9 +191,9 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
             return
         }
         
-        // 如果当前在 Git 提交场景中，不要干扰
-        if (GitCommitSceneManager.isInGitCommitScene()) {
-            logger.info("当前在 Git 提交场景中，跳过自动切换")
+        // 如果当前在特殊场景中（Git 提交、工具窗口等），不要干扰
+        if (GitCommitSceneManager.isInAnySpecialScene()) {
+            logger.info("当前在特殊场景中，跳过自动切换")
             return
         }
 
@@ -263,13 +263,16 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         }
 
         // 显示 Toast 提示 - 根据实际切换结果显示
+        logger.info("准备显示 Toast: isShowHints=${settings.isShowHints}")
         if (settings.isShowHints) {
             ApplicationManager.getApplication().invokeLater {
                 val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                logger.info("activeEditor: $activeEditor")
                 if (activeEditor != null) {
                     if (switchResult.success) {
                         val toastMessage = generateToastMessage(contextInfo, switchResult.actualMethod, fileName, switchResult.message)
                         val isChinese = switchResult.actualMethod == InputMethodType.CHINESE
+                        logger.info("显示 Toast: $toastMessage, isChinese=$isChinese")
                         ToastManager.showToast(activeEditor, toastMessage, isChinese)
                     } else {
                         val failureMessage = when {
@@ -278,10 +281,15 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
                             switchResult.message.contains("冷却中") -> "输入法切换失败：切换过于频繁"
                             else -> "输入法切换失败：${switchResult.message}"
                         }
+                        logger.info("显示失败 Toast: $failureMessage")
                         ToastManager.showToast(activeEditor, failureMessage, false)
                     }
+                } else {
+                    logger.warn("activeEditor 为 null，无法显示 Toast")
                 }
             }
+        } else {
+            logger.info("isShowHints=false，跳过 Toast 显示")
         }
 
         lastContextInfo = contextInfo

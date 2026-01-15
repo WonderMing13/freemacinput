@@ -64,6 +64,13 @@ object StringInputRescue {
             }
             
             val (stringStart, stringEnd) = stringRange
+            
+            // 安全检查：确保范围有效
+            if (stringStart < 0 || stringEnd > text.length || stringStart >= stringEnd) {
+                logger.warn("字符串范围无效: [$stringStart, $stringEnd], 文档长度: ${text.length}")
+                return false
+            }
+            
             val stringContent = text.substring(stringStart, stringEnd)
             
             logger.info("字符串范围: [$stringStart, $stringEnd], 内容: '$stringContent'")
@@ -74,29 +81,36 @@ object StringInputRescue {
                 return false
             }
             
-            logger.info("准备补救输入：删除 '$stringContent'")
+            // 只删除光标前的英文字符，不删除整个字符串
+            val deleteStart = findEnglishTextStart(text, currentOffset, stringStart)
+            val deleteEnd = currentOffset
+            
+            if (deleteStart >= deleteEnd) {
+                logger.info("没有需要删除的英文字符")
+                return false
+            }
+            
+            val toDelete = text.substring(deleteStart, deleteEnd)
+            logger.info("准备补救输入：删除光标前的英文字符 '$toDelete' (范围: [$deleteStart, $deleteEnd])")
             
             // 在 EDT 线程中执行删除，并确保光标位置正确
             ApplicationManager.getApplication().invokeLater {
                 try {
-                    logger.info("开始删除字符串内容...")
+                    logger.info("开始删除英文字符...")
                     WriteCommandAction.runWriteCommandAction(project) {
-                        // 删除字符串内容
-                        editor.document.deleteString(stringStart, stringEnd)
+                        // 删除英文字符
+                        editor.document.deleteString(deleteStart, deleteEnd)
                         
-                        // 确保光标在字符串内（引号之间）
-                        // 使用 runReadAction 确保在正确的线程中读取文档
-                        ApplicationManager.getApplication().runReadAction<Unit> {
-                            val newOffset = stringStart
-                            // 验证新位置是否有效
-                            if (newOffset >= 0 && newOffset <= editor.document.textLength) {
-                                editor.caretModel.moveToOffset(newOffset)
-                                // 滚动到光标位置
-                                editor.scrollingModel.scrollToCaret(com.intellij.openapi.editor.ScrollType.MAKE_VISIBLE)
-                                logger.info("✅ 输入补救成功：已删除 '$stringContent'，光标位置: $newOffset")
-                            } else {
-                                logger.warn("光标位置无效: $newOffset, 文档长度: ${editor.document.textLength}")
-                            }
+                        // 确保光标在删除位置
+                        val newOffset = deleteStart
+                        // 验证新位置是否有效
+                        if (newOffset >= 0 && newOffset <= editor.document.textLength) {
+                            editor.caretModel.moveToOffset(newOffset)
+                            // 滚动到光标位置
+                            editor.scrollingModel.scrollToCaret(com.intellij.openapi.editor.ScrollType.MAKE_VISIBLE)
+                            logger.info("✅ 输入补救成功：已删除 '$toDelete'，光标位置: $newOffset")
+                        } else {
+                            logger.warn("光标位置无效: $newOffset, 文档长度: ${editor.document.textLength}")
                         }
                     }
                 } catch (e: Exception) {
@@ -193,6 +207,26 @@ object StringInputRescue {
         } catch (e: Exception) {
             logger.error("输入字符 '$char' 失败: ${e.message}", e)
         }
+    }
+    
+    /**
+     * 查找光标前连续英文字符的起始位置
+     * 只删除光标前的连续英文字符，不删除整个字符串
+     */
+    private fun findEnglishTextStart(text: String, offset: Int, stringStart: Int): Int {
+        var start = offset - 1
+        
+        // 向前查找，直到遇到非英文字符或到达字符串开始
+        while (start >= stringStart) {
+            val c = text[start]
+            if (c !in 'a'..'z' && c !in 'A'..'Z') {
+                break
+            }
+            start--
+        }
+        
+        // start 现在指向最后一个非英文字符，所以返回 start + 1
+        return start + 1
     }
     
     /**

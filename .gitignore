@@ -28,6 +28,8 @@ out/
 bin/
 !**/src/main/**/bin/
 !**/src/test/**/bin/
+# 但是排除 Swift 编译的二进制文件（需要提交到仓库）
+!src/main/resources/bin/InputMethodSwitcher
 
 ### NetBeans ###
 /nbproject/private/

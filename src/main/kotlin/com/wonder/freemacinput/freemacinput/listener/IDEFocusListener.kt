@@ -97,9 +97,9 @@ class IDEFocusListener(private val project: Project) : WindowFocusListener {
     override fun windowLostFocus(e: WindowEvent?) {
         logger.info("IDE 窗口失去焦点")
         
-        // 如果当前在 Git 提交场景中，不要切换
-        if (GitCommitSceneManager.isInGitCommitScene()) {
-            logger.info("当前在 Git 提交场景中，跳过离开IDE的输入法切换")
+        // 如果当前在特殊场景中（Git 提交、工具窗口等），不要切换
+        if (GitCommitSceneManager.isInAnySpecialScene()) {
+            logger.info("当前在特殊场景中，跳过离开IDE的输入法切换")
             return
         }
         

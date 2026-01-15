@@ -21,6 +21,7 @@ import com.wonder.freemacinput.freemacinput.core.InputMethodManager
 import com.wonder.freemacinput.freemacinput.listener.EditorEventListener
 import com.wonder.freemacinput.freemacinput.listener.IDEFocusListener
 import com.wonder.freemacinput.freemacinput.listener.GitCommitListener
+import com.wonder.freemacinput.freemacinput.listener.ToolWindowFocusListener
 import com.wonder.freemacinput.freemacinput.service.InputMethodService
 import com.wonder.freemacinput.freemacinput.ui.ToastManager
 
@@ -35,6 +36,7 @@ class StartupActivity : IJStartupActivity, DumbAware {
     private var editorListener: EditorEventListener? = null
     private var ideFocusListener: IDEFocusListener? = null
     private var gitCommitListener: GitCommitListener? = null
+    private var toolWindowListener: ToolWindowFocusListener? = null
     private var connection: MessageBusConnection? = null
 
     init {
@@ -102,6 +104,15 @@ class StartupActivity : IJStartupActivity, DumbAware {
             // 创建并注册 Git 提交场景监听器
             gitCommitListener = GitCommitListener(project)
             gitCommitListener?.register()
+            
+            // 创建并注册工具窗口监听器
+            toolWindowListener = ToolWindowFocusListener(project)
+            connection?.subscribe(
+                com.intellij.openapi.wm.ex.ToolWindowManagerListener.TOPIC,
+                toolWindowListener!!
+            )
+            // 为工具窗口组件添加焦点监听
+            toolWindowListener?.attachFocusListeners()
 
             // 注册编辑器工厂事件监听
             EditorFactory.getInstance().addEditorFactoryListener(object : EditorFactoryListener {
