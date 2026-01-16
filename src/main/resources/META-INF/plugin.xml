@@ -45,6 +45,18 @@
             displayName="工具窗口场景"
             instance="com.wonder.freemacinput.freemacinput.config.ToolWindowSceneConfigurable"/>
         
+        <applicationConfigurable 
+            parentId="FreeMacInput" 
+            id="FreeMacInput.CustomEventScene" 
+            displayName="自定义事件场景"
+            instance="com.wonder.freemacinput.freemacinput.config.CustomEventSceneConfigurable"/>
+        
+        <applicationConfigurable 
+            parentId="FreeMacInput" 
+            id="FreeMacInput.CustomPatternScene" 
+            displayName="自定义规则场景"
+            instance="com.wonder.freemacinput.freemacinput.config.CustomPatternSceneConfigurable"/>
+        
         <applicationService serviceImplementation="com.wonder.freemacinput.freemacinput.config.SettingsState"/>
         <postStartupActivity implementation="com.wonder.freemacinput.freemacinput.StartupActivity"/>
     </extensions>

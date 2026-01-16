@@ -6,6 +6,7 @@ import com.wonder.freemacinput.freemacinput.core.InputMethodType
 import com.wonder.freemacinput.freemacinput.core.SwitchStrategy
 import com.wonder.freemacinput.freemacinput.core.InputMethodManager
 import com.wonder.freemacinput.freemacinput.core.InputMethodDetector
+import com.wonder.freemacinput.freemacinput.core.CursorColorManager
 import javax.swing.*
 import java.awt.*
 import java.awt.event.ActionListener
@@ -18,12 +19,18 @@ class BasicSettingsConfigurable : Configurable {
     private var panel: JPanel? = null
     private var enableCheckBox: JCheckBox? = null
     private var showHintsCheckBox: JCheckBox? = null
+    private var enableCaretColorCheckBox: JCheckBox? = null
     private var leaveIDEComboBox: JComboBox<String>? = null
     
     // 新增：输入法选择和切换方案
     private var chineseIMComboBox: JComboBox<String>? = null
     private var englishIMComboBox: JComboBox<String>? = null
     private var switchStrategyComboBox: JComboBox<String>? = null
+    
+    // 光标颜色配置
+    private var chineseCaretColorField: JTextField? = null
+    private var englishCaretColorField: JTextField? = null
+    private var capsLockCaretColorField: JTextField? = null
     
     override fun getDisplayName(): String = "基本设置"
     
@@ -47,6 +54,133 @@ class BasicSettingsConfigurable : Configurable {
         gbc.gridy = row++
         showHintsCheckBox = JCheckBox("显示切换提示")
         mainPanel.add(showHintsCheckBox!!, gbc)
+        
+        // 光标颜色设置
+        gbc.gridy = row++
+        enableCaretColorCheckBox = JCheckBox("启用光标颜色指示")
+        mainPanel.add(enableCaretColorCheckBox!!, gbc)
+        
+        // 光标颜色配置面板
+        gbc.gridy = row++
+        gbc.gridwidth = 2
+        val colorPanel = JPanel(GridBagLayout())
+        val colorGbc = GridBagConstraints()
+        colorGbc.anchor = GridBagConstraints.WEST
+        colorGbc.fill = GridBagConstraints.HORIZONTAL
+        colorGbc.insets = Insets(2, 20, 2, 5)
+        
+        var colorRow = 0
+        
+        // 中文输入法光标颜色
+        colorGbc.gridx = 0
+        colorGbc.gridy = colorRow
+        colorGbc.gridwidth = 1
+        colorPanel.add(JLabel("中文输入法："), colorGbc)
+        
+        colorGbc.gridx = 1
+        chineseCaretColorField = JTextField(8)
+        colorPanel.add(chineseCaretColorField!!, colorGbc)
+        
+        colorGbc.gridx = 2
+        val chineseColorPreview = JLabel("   ")
+        chineseColorPreview.isOpaque = true
+        chineseColorPreview.border = BorderFactory.createLineBorder(Color.BLACK)
+        colorPanel.add(chineseColorPreview, colorGbc)
+        
+        colorGbc.gridx = 3
+        val chineseColorButton = JButton("选择")
+        chineseColorButton.addActionListener {
+            val currentColor = CursorColorManager.parseColor(chineseCaretColorField?.text ?: "EF1616") ?: Color(0xEF, 0x16, 0x16)
+            val newColor = JColorChooser.showDialog(mainPanel, "选择中文输入法光标颜色", currentColor)
+            if (newColor != null) {
+                val hex = String.format("%02X%02X%02X", newColor.red, newColor.green, newColor.blue)
+                chineseCaretColorField?.text = hex
+            }
+        }
+        colorPanel.add(chineseColorButton, colorGbc)
+        
+        // 英文输入法光标颜色
+        colorGbc.gridx = 0
+        colorGbc.gridy = ++colorRow
+        colorPanel.add(JLabel("英文输入法："), colorGbc)
+        
+        colorGbc.gridx = 1
+        englishCaretColorField = JTextField(8)
+        colorPanel.add(englishCaretColorField!!, colorGbc)
+        
+        colorGbc.gridx = 2
+        val englishColorPreview = JLabel("   ")
+        englishColorPreview.isOpaque = true
+        englishColorPreview.border = BorderFactory.createLineBorder(Color.BLACK)
+        colorPanel.add(englishColorPreview, colorGbc)
+        
+        colorGbc.gridx = 3
+        val englishColorButton = JButton("选择")
+        englishColorButton.addActionListener {
+            val currentColor = CursorColorManager.parseColor(englishCaretColorField?.text ?: "DCDCD9") ?: Color(0xDC, 0xDC, 0xD9)
+            val newColor = JColorChooser.showDialog(mainPanel, "选择英文输入法光标颜色", currentColor)
+            if (newColor != null) {
+                val hex = String.format("%02X%02X%02X", newColor.red, newColor.green, newColor.blue)
+                englishCaretColorField?.text = hex
+            }
+        }
+        colorPanel.add(englishColorButton, colorGbc)
+        
+        // 大写锁定光标颜色
+        colorGbc.gridx = 0
+        colorGbc.gridy = ++colorRow
+        colorPanel.add(JLabel("大写锁定："), colorGbc)
+        
+        colorGbc.gridx = 1
+        capsLockCaretColorField = JTextField(8)
+        colorPanel.add(capsLockCaretColorField!!, colorGbc)
+        
+        colorGbc.gridx = 2
+        val capsLockColorPreview = JLabel("   ")
+        capsLockColorPreview.isOpaque = true
+        capsLockColorPreview.border = BorderFactory.createLineBorder(Color.BLACK)
+        colorPanel.add(capsLockColorPreview, colorGbc)
+        
+        colorGbc.gridx = 3
+        val capsLockColorButton = JButton("选择")
+        capsLockColorButton.addActionListener {
+            val currentColor = CursorColorManager.parseColor(capsLockCaretColorField?.text ?: "F6E30E") ?: Color(0xF6, 0xE3, 0x0E)
+            val newColor = JColorChooser.showDialog(mainPanel, "选择大写锁定光标颜色", currentColor)
+            if (newColor != null) {
+                val hex = String.format("%02X%02X%02X", newColor.red, newColor.green, newColor.blue)
+                capsLockCaretColorField?.text = hex
+            }
+        }
+        colorPanel.add(capsLockColorButton, colorGbc)
+        
+        mainPanel.add(colorPanel, gbc)
+        
+        // 添加颜色预览更新监听器
+        val updateColorPreview = { field: JTextField, preview: JLabel ->
+            val hex = field.text
+            val color = com.wonder.freemacinput.freemacinput.core.CursorColorManager.parseColor(hex)
+            if (color != null) {
+                preview.background = color
+            }
+        }
+        
+        chineseCaretColorField?.document?.addDocumentListener(object : javax.swing.event.DocumentListener {
+            override fun insertUpdate(e: javax.swing.event.DocumentEvent?) = updateColorPreview(chineseCaretColorField!!, chineseColorPreview)
+            override fun removeUpdate(e: javax.swing.event.DocumentEvent?) = updateColorPreview(chineseCaretColorField!!, chineseColorPreview)
+            override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = updateColorPreview(chineseCaretColorField!!, chineseColorPreview)
+        })
+        
+        englishCaretColorField?.document?.addDocumentListener(object : javax.swing.event.DocumentListener {
+            override fun insertUpdate(e: javax.swing.event.DocumentEvent?) = updateColorPreview(englishCaretColorField!!, englishColorPreview)
+            override fun removeUpdate(e: javax.swing.event.DocumentEvent?) = updateColorPreview(englishCaretColorField!!, englishColorPreview)
+            override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = updateColorPreview(englishCaretColorField!!, englishColorPreview)
+        })
+        
+        capsLockCaretColorField?.document?.addDocumentListener(object : javax.swing.event.DocumentListener {
+            override fun insertUpdate(e: javax.swing.event.DocumentEvent?) = updateColorPreview(capsLockCaretColorField!!, capsLockColorPreview)
+            override fun removeUpdate(e: javax.swing.event.DocumentEvent?) = updateColorPreview(capsLockCaretColorField!!, capsLockColorPreview)
+            override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = updateColorPreview(capsLockCaretColorField!!, capsLockColorPreview)
+        })
         
         // 分隔线
         gbc.gridy = row++
@@ -401,6 +535,10 @@ class BasicSettingsConfigurable : Configurable {
         val settings = getSettings()
         return enableCheckBox?.isSelected != settings.isEnabled ||
                showHintsCheckBox?.isSelected != settings.isShowHints ||
+               enableCaretColorCheckBox?.isSelected != settings.isEnableCaretColor ||
+               chineseCaretColorField?.text != settings.chineseCaretColor ||
+               englishCaretColorField?.text != settings.englishCaretColor ||
+               capsLockCaretColorField?.text != settings.capsLockCaretColor ||
                getSelectedStrategy() != settings.leaveIDEStrategy ||
                getSelectedSwitchStrategy() != settings.switchStrategy ||
                getSelectedChineseIM() != settings.chineseInputMethodId ||
@@ -411,6 +549,10 @@ class BasicSettingsConfigurable : Configurable {
         val settings = getSettings()
         settings.isEnabled = enableCheckBox?.isSelected ?: true
         settings.isShowHints = showHintsCheckBox?.isSelected ?: true
+        settings.isEnableCaretColor = enableCaretColorCheckBox?.isSelected ?: true
+        settings.chineseCaretColor = chineseCaretColorField?.text ?: "EF1616"
+        settings.englishCaretColor = englishCaretColorField?.text ?: "DCDCD9"
+        settings.capsLockCaretColor = capsLockCaretColorField?.text ?: "F6E30E"
         settings.leaveIDEStrategy = getSelectedStrategy()
         settings.switchStrategy = getSelectedSwitchStrategy()
         settings.chineseInputMethodId = getSelectedChineseIM()
@@ -421,6 +563,10 @@ class BasicSettingsConfigurable : Configurable {
         val settings = getSettings()
         enableCheckBox?.isSelected = settings.isEnabled
         showHintsCheckBox?.isSelected = settings.isShowHints
+        enableCaretColorCheckBox?.isSelected = settings.isEnableCaretColor
+        chineseCaretColorField?.text = settings.chineseCaretColor
+        englishCaretColorField?.text = settings.englishCaretColor
+        capsLockCaretColorField?.text = settings.capsLockCaretColor
         setSelectedStrategy(settings.leaveIDEStrategy)
         setSelectedSwitchStrategy(settings.switchStrategy)
         setSelectedChineseIM(settings.chineseInputMethodId)

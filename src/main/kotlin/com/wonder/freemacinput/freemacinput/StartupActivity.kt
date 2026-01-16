@@ -22,6 +22,7 @@ import com.wonder.freemacinput.freemacinput.listener.EditorEventListener
 import com.wonder.freemacinput.freemacinput.listener.IDEFocusListener
 import com.wonder.freemacinput.freemacinput.listener.GitCommitListener
 import com.wonder.freemacinput.freemacinput.listener.ToolWindowFocusListener
+import com.wonder.freemacinput.freemacinput.listener.CustomEventListener
 import com.wonder.freemacinput.freemacinput.service.InputMethodService
 import com.wonder.freemacinput.freemacinput.ui.ToastManager
 
@@ -113,6 +114,10 @@ class StartupActivity : IJStartupActivity, DumbAware {
             )
             // 为工具窗口组件添加焦点监听
             toolWindowListener?.attachFocusListeners()
+            
+            // 注册自定义事件监听器
+            CustomEventListener.register(project)
+            logger.info("✅ 自定义事件监听器已注册")
 
             // 注册编辑器工厂事件监听
             EditorFactory.getInstance().addEditorFactoryListener(object : EditorFactoryListener {

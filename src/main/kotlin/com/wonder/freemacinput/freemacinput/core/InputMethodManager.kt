@@ -30,6 +30,11 @@ object InputMethodManager {
     @Volatile
     private var cacheTime: Long = 0
     private const val CACHE_DURATION_MS = 500L
+    
+    // 标记是否是插件自动切换（用于区分手动切换）
+    @Volatile
+    private var isAutoSwitching: Boolean = false
+    private var autoSwitchEndTime: Long = 0
 
     // macOS 输入法 ID 配置
     private var macChineseIMId: String? = null
@@ -100,6 +105,10 @@ object InputMethodManager {
         logger.info("========================================")
         logger.info("   switchTo 被调用: method=$method")
         logger.info("========================================")
+        
+        // 标记为自动切换，持续1秒
+        isAutoSwitching = true
+        autoSwitchEndTime = System.currentTimeMillis() + 1000
 
         if (!isMacOS && !isWindows) {
             val result = SwitchResult(false, "不支持当前操作系统", InputMethodType.AUTO)
@@ -552,6 +561,18 @@ object InputMethodManager {
         val keyCode = 49 // Space key
         
         return AdvancedInputMethodSwitcher.switchWithShortcut(modifiers, keyCode)
+    }
+    
+    /**
+     * 检查当前是否是插件自动切换
+     * 如果在自动切换后的1秒内，认为是自动切换
+     */
+    fun isAutoSwitching(): Boolean {
+        val now = System.currentTimeMillis()
+        if (now > autoSwitchEndTime) {
+            isAutoSwitching = false
+        }
+        return isAutoSwitching
     }
 
 }

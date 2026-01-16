@@ -14,7 +14,9 @@ import com.wonder.freemacinput.freemacinput.core.GitCommitSceneManager
 import com.wonder.freemacinput.freemacinput.service.InputMethodService
 import com.wonder.freemacinput.freemacinput.ui.ToastManager
 import com.wonder.freemacinput.freemacinput.ui.CommentSceneHintManager
+import com.wonder.freemacinput.freemacinput.config.SettingsState
 import com.intellij.openapi.application.ApplicationManager
+import java.awt.Color
 
 import java.util.Timer
 import java.util.TimerTask
@@ -37,6 +39,17 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     private var cachedDocumentText: String? = null
     private var cachedDocumentLength: Int = -1
     
+    // 大写锁定状态监听
+    private var capsLockMonitorTimer: Timer? = null
+    private var capsLockMonitorTask: TimerTask? = null
+    private var lastCapsLockState: Boolean = false
+    
+    // 输入法状态监听（用于检测用户手动切换）
+    private var inputMethodMonitorTimer: Timer? = null
+    private var inputMethodMonitorTask: TimerTask? = null
+    private var lastInputMethod: InputMethodType = InputMethodType.UNKNOWN
+    private var lastInputMethodChangeTime: Long = 0  // 上次输入法变化时间
+    
     // 字符串场景状态管理
     private var inStringScene = false
     private var stringSceneVariableName: String? = null
@@ -57,6 +70,12 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         val data = extractEditorData(editor)
         logger.info("onEditorActivated: ${data.fileName}, offset=${data.caretOffset}")
         scheduleInputMethodSwitch(data.fileName, data.documentText, data.caretOffset, 450L)
+        
+        // 启动大写锁定监听
+        startCapsLockMonitoring()
+        
+        // 启动输入法状态监听
+        startInputMethodMonitoring()
     }
 
     private fun extractEditorData(editor: Editor): EditorData {
@@ -206,6 +225,53 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
             logger.info("   变量名: ${contextInfo.variableName}, 语言: ${contextInfo.language}")
         }
 
+        // 获取设置
+        val settings = inputMethodService.getSettings()
+        
+        // 检查自定义规则（优先级最高）
+        val customRuleMatch = checkCustomPatternRules(documentText, caretOffset, fileName, contextInfo.type, settings)
+        if (customRuleMatch != null) {
+            logger.info("🎯 匹配到自定义规则: ${customRuleMatch.name} -> ${customRuleMatch.targetInputMethod}")
+            val targetMethod = customRuleMatch.targetInputMethod
+            
+            // 使用 InputMethodManager 的内部状态与冷却判定
+            val (should, reason) = InputMethodManager.shouldSwitch(targetMethod)
+            logger.info("🔄 是否需要切换: $should, 原因: $reason")
+            
+            if (should) {
+                logger.info("⚡ 开始切换输入法...")
+                val switchResult = InputMethodManager.switchTo(targetMethod, settings)
+                val elapsed = System.currentTimeMillis() - startTs
+                logger.info("✅ 切换结果: success=${switchResult.success}, 实际输入法=${switchResult.actualMethod}, 耗时=${elapsed}ms")
+                
+                // 更新光标颜色
+                if (switchResult.success && settings.isEnableCaretColor) {
+                    ApplicationManager.getApplication().invokeLater {
+                        val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                        if (activeEditor != null) {
+                            updateCursorColor(activeEditor, switchResult.actualMethod, settings)
+                        }
+                    }
+                }
+                
+                // 显示 Toast 提示
+                if (settings.isShowHints) {
+                    ApplicationManager.getApplication().invokeLater {
+                        val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                        if (activeEditor != null && switchResult.success) {
+                            val toastMessage = "自定义规则: ${customRuleMatch.name}"
+                            val isChinese = switchResult.actualMethod == InputMethodType.CHINESE
+                            ToastManager.showToast(activeEditor, toastMessage, isChinese)
+                        }
+                    }
+                }
+            }
+            
+            lastContextInfo = contextInfo
+            logger.info("========== 检测结束（自定义规则）==========\n")
+            return
+        }
+
         // 字符串场景特殊处理
         if (contextInfo.type == ContextType.STRING) {
             handleStringScene(contextInfo, fileName)
@@ -243,10 +309,20 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         }
 
         logger.info("⚡ 开始切换输入法...")
-        val settings = inputMethodService.getSettings()
         val switchResult = InputMethodManager.switchTo(targetMethod, settings)
         val elapsed = System.currentTimeMillis() - startTs
         logger.info("✅ 切换结果: success=${switchResult.success}, 实际输入法=${switchResult.actualMethod}, 耗时=${elapsed}ms")
+        
+        // 更新光标颜色
+        if (switchResult.success && settings.isEnableCaretColor) {
+            ApplicationManager.getApplication().invokeLater {
+                val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                if (activeEditor != null) {
+                    updateCursorColor(activeEditor, switchResult.actualMethod, settings)
+                }
+            }
+        }
+        
         logger.info("========== 检测结束 ==========\n")
 
         // 补救功能：从英文切换到中文时
@@ -349,6 +425,16 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
                 val switchResult = InputMethodManager.switchTo(targetMethod, settings)
                 logger.info("   切换结果: ${switchResult.success}, 实际: ${switchResult.actualMethod}")
                 stringSceneSwitched = true  // 标记已切换
+                
+                // 更新光标颜色
+                if (switchResult.success && settings.isEnableCaretColor) {
+                    ApplicationManager.getApplication().invokeLater {
+                        val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                        if (activeEditor != null) {
+                            updateCursorColor(activeEditor, switchResult.actualMethod, settings)
+                        }
+                    }
+                }
                 
                 // 补救功能
                 if (switchResult.success && 
@@ -752,9 +838,185 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
 
     fun dispose() {
         stopContinuousMonitoring()  // 停止持续监听
+        stopCapsLockMonitoring()  // 停止大写锁定监听
+        stopInputMethodMonitoring()  // 停止输入法状态监听
         timer.cancel()
         CaretRendererManager.disposeAll()
         ToastManager.dismissAll()
+    }
+    
+    /**
+     * 更新光标颜色
+     */
+    private fun updateCursorColor(editor: Editor, inputMethod: InputMethodType, settings: SettingsState) {
+        try {
+            val chineseColor = CursorColorManager.parseColor(settings.chineseCaretColor) ?: Color(0xEF, 0x16, 0x16)
+            val englishColor = CursorColorManager.parseColor(settings.englishCaretColor) ?: Color(0xDC, 0xDC, 0xD9)
+            val capsLockColor = CursorColorManager.parseColor(settings.capsLockCaretColor) ?: Color(0xF6, 0xE3, 0x0E)
+            
+            CursorColorManager.setCursorColorByInputMethod(
+                editor,
+                inputMethod,
+                chineseColor,
+                englishColor,
+                capsLockColor
+            )
+        } catch (e: Exception) {
+            logger.error("更新光标颜色失败", e)
+        }
+    }
+    
+    /**
+     * 启动输入法状态监听（检测用户手动切换）
+     */
+    private fun startInputMethodMonitoring() {
+        val settings = inputMethodService.getSettings()
+        if (!settings.isEnableCaretColor) {
+            return
+        }
+        
+        // 先停止之前的监听
+        stopInputMethodMonitoring()
+        
+        logger.info("🔍 启动输入法状态监听")
+        lastInputMethod = InputMethodManager.getCurrentInputMethod()
+        
+        inputMethodMonitorTimer = Timer("InputMethodMonitor", true)
+        inputMethodMonitorTask = object : TimerTask() {
+            override fun run() {
+                val currentMethod = InputMethodManager.getCurrentInputMethod()
+                
+                // 如果输入法状态发生变化，更新光标颜色
+                if (currentMethod != lastInputMethod && currentMethod != InputMethodType.UNKNOWN) {
+                    logger.info("🔄 检测到输入法变化: $lastInputMethod -> $currentMethod")
+                    lastInputMethod = currentMethod
+                    
+                    // 更新光标颜色
+                    ApplicationManager.getApplication().invokeLater {
+                        val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                        if (activeEditor != null) {
+                            updateCursorColor(activeEditor, currentMethod, settings)
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 每 200ms 检查一次
+        inputMethodMonitorTimer?.schedule(inputMethodMonitorTask, 200L, 200L)
+    }
+    
+    /**
+     * 停止输入法状态监听
+     */
+    private fun stopInputMethodMonitoring() {
+        inputMethodMonitorTask?.cancel()
+        inputMethodMonitorTask = null
+        inputMethodMonitorTimer?.cancel()
+        inputMethodMonitorTimer = null
+    }
+    
+    /**
+     * 启动大写锁定状态监听
+     */
+    private fun startCapsLockMonitoring() {
+        val settings = inputMethodService.getSettings()
+        if (!settings.isEnableCaretColor) {
+            return
+        }
+        
+        // 先停止之前的监听
+        stopCapsLockMonitoring()
+        
+        logger.info("🔍 启动大写锁定状态监听")
+        lastCapsLockState = isCapsLockOn()
+        
+        capsLockMonitorTimer = Timer("CapsLockMonitor", true)
+        capsLockMonitorTask = object : TimerTask() {
+            override fun run() {
+                val currentCapsLockState = isCapsLockOn()
+                
+                // 如果大写锁定状态发生变化
+                if (currentCapsLockState != lastCapsLockState) {
+                    logger.info("🔄 大写锁定状态变化: $lastCapsLockState -> $currentCapsLockState")
+                    lastCapsLockState = currentCapsLockState
+                    
+                    // 更新光标颜色
+                    ApplicationManager.getApplication().invokeLater {
+                        val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                        if (activeEditor != null) {
+                            val currentMethod = InputMethodManager.getCurrentInputMethod()
+                            updateCursorColor(activeEditor, currentMethod, settings)
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 每 300ms 检查一次
+        capsLockMonitorTimer?.schedule(capsLockMonitorTask, 300L, 300L)
+    }
+    
+    /**
+     * 停止大写锁定状态监听
+     */
+    private fun stopCapsLockMonitoring() {
+        capsLockMonitorTask?.cancel()
+        capsLockMonitorTask = null
+        capsLockMonitorTimer?.cancel()
+        capsLockMonitorTimer = null
+    }
+    
+    /**
+     * 检查大写锁定是否开启
+     */
+    private fun isCapsLockOn(): Boolean {
+        return try {
+            java.awt.Toolkit.getDefaultToolkit().getLockingKeyState(java.awt.event.KeyEvent.VK_CAPS_LOCK)
+        } catch (e: Exception) {
+            false
+        }
+    }
+    
+    /**
+     * 检查自定义规则
+     * 返回匹配的规则，如果没有匹配则返回null
+     */
+    private fun checkCustomPatternRules(
+        documentText: String,
+        caretOffset: Int,
+        fileName: String,
+        contextType: ContextType,
+        settings: SettingsState
+    ): com.wonder.freemacinput.freemacinput.config.CustomPatternRule? {
+        if (settings.customPatternRules.isEmpty()) {
+            return null
+        }
+        
+        // 获取光标左右两侧的文本
+        val leftText = if (caretOffset > 0) {
+            documentText.substring(0, caretOffset)
+        } else {
+            ""
+        }
+        
+        val rightText = if (caretOffset < documentText.length) {
+            documentText.substring(caretOffset)
+        } else {
+            ""
+        }
+        
+        // 获取文件扩展名
+        val fileExtension = fileName.substringAfterLast('.', "")
+        
+        // 遍历所有规则，找到第一个匹配的
+        for (rule in settings.customPatternRules) {
+            if (rule.matches(leftText, rightText, fileExtension, contextType)) {
+                return rule
+            }
+        }
+        
+        return null
     }
 
     private data class EditorData(
