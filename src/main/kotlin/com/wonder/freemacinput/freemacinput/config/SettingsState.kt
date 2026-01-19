@@ -82,47 +82,10 @@ class SettingsState : PersistentStateComponent<SettingsState> {
                 description = "当光标位于中文字符之间时，切换为中文输入法",
                 fileTypes = mutableListOf(),
                 applyToAllAreas = true,
-                leftPattern = ".*[\\u4e00-\\u9fa5]$",
-                rightPattern = "^[\\u4e00-\\u9fa5].*",
+                leftPattern = "[\\u4e00-\\u9fa5]",  // 只匹配最后一个字符
+                rightPattern = "[\\u4e00-\\u9fa5]",  // 只匹配第一个字符
                 matchStrategy = MatchStrategy.BOTH,
                 targetInputMethod = InputMethodType.CHINESE
-            ),
-            // 大写字母之间切换为大写
-            CustomPatternRule(
-                enabled = true,
-                name = "大写字母之间切换为大写",
-                description = "当光标位于大写字母之间时，保持英文输入法",
-                fileTypes = mutableListOf(),
-                applyToAllAreas = true,
-                leftPattern = ".*[A-Z]$",
-                rightPattern = "^[A-Z].*",
-                matchStrategy = MatchStrategy.BOTH,
-                targetInputMethod = InputMethodType.ENGLISH
-            ),
-            // 连续大写字母切换为大写
-            CustomPatternRule(
-                enabled = true,
-                name = "连续大写字母切换为大写",
-                description = "当光标左侧是连续大写字母时，保持英文输入法",
-                fileTypes = mutableListOf(),
-                applyToAllAreas = true,
-                leftPattern = ".*[A-Z]{2,}$",
-                rightPattern = "",
-                matchStrategy = MatchStrategy.EITHER,
-                targetInputMethod = InputMethodType.ENGLISH
-            ),
-            // 小写字母切换为英文（仅在java文件的private/static等关键字后）
-            CustomPatternRule(
-                enabled = true,
-                name = "小写字母切换为英文（Java关键字）",
-                description = "在Java文件中，private/static等关键字后切换为英文",
-                fileTypes = mutableListOf("java"),
-                applyToCodeArea = true,
-                applyToAllAreas = false,
-                leftPattern = ".*(\\?:private|static).*",
-                rightPattern = "",
-                matchStrategy = MatchStrategy.EITHER,
-                targetInputMethod = InputMethodType.ENGLISH
             ),
             // 英文字母之间切换为英文
             CustomPatternRule(
@@ -131,23 +94,9 @@ class SettingsState : PersistentStateComponent<SettingsState> {
                 description = "当光标位于英文字母之间时，切换为英文输入法",
                 fileTypes = mutableListOf(),
                 applyToAllAreas = true,
-                leftPattern = ".*[a-zA-Z]$",
-                rightPattern = "^[a-zA-Z].*",
+                leftPattern = "[a-zA-Z]",  // 只匹配最后一个字符
+                rightPattern = "[a-zA-Z]",  // 只匹配第一个字符
                 matchStrategy = MatchStrategy.BOTH,
-                targetInputMethod = InputMethodType.ENGLISH
-            ),
-            // 连续英文字母切换为英文（java文件）
-            CustomPatternRule(
-                enabled = true,
-                name = "连续英文字母切换为英文",
-                description = "当光标左侧是连续英文字母时，切换为英文输入法",
-                fileTypes = mutableListOf("java"),
-                applyToStringArea = true,
-                applyToCommentArea = true,
-                applyToAllAreas = false,
-                leftPattern = ".*[a-zA-Z]{2,}$",
-                rightPattern = "",
-                matchStrategy = MatchStrategy.EITHER,
                 targetInputMethod = InputMethodType.ENGLISH
             )
         ))

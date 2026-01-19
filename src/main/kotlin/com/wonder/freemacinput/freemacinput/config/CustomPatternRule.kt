@@ -37,7 +37,9 @@ data class CustomPatternRule(
      * 检查是否匹配
      */
     fun matches(leftText: String, rightText: String, fileType: String, contextType: ContextType): Boolean {
-        if (!enabled) return false
+        if (!enabled) {
+            return false
+        }
         
         // 检查文件类型
         if (fileTypes.isNotEmpty() && !fileTypes.any { it.equals(fileType, ignoreCase = true) }) {
@@ -55,27 +57,54 @@ data class CustomPatternRule(
             if (!areaMatches) return false
         }
         
-        // 检查左右匹配规则
-        val leftMatches = if (leftPattern.isBlank()) true else {
+        // 检查左侧匹配：只检查最后一个字符
+        val leftMatches = if (leftPattern.isBlank()) {
+            true
+        } else {
             try {
-                leftPattern.toRegex().matches(leftText)
+                if (leftText.isEmpty()) {
+                    false
+                } else {
+                    val lastChar = leftText.last().toString()
+                    val matches = lastChar.matches(leftPattern.toRegex())
+                    println("[$name] 左侧: 最后字符'${leftText.last()}' 匹配 '$leftPattern' = $matches")
+                    matches
+                }
             } catch (e: Exception) {
+                println("[$name] 左侧正则错误: ${e.message}")
                 false
             }
         }
         
-        val rightMatches = if (rightPattern.isBlank()) true else {
+        // 检查右侧匹配：只检查第一个字符
+        val rightMatches = if (rightPattern.isBlank()) {
+            true
+        } else {
             try {
-                rightPattern.toRegex().matches(rightText)
+                if (rightText.isEmpty()) {
+                    false
+                } else {
+                    val firstChar = rightText.first().toString()
+                    val matches = firstChar.matches(rightPattern.toRegex())
+                    println("[$name] 右侧: 第一字符'${rightText.first()}' 匹配 '$rightPattern' = $matches")
+                    matches
+                }
             } catch (e: Exception) {
+                println("[$name] 右侧正则错误: ${e.message}")
                 false
             }
         }
         
-        return when (matchStrategy) {
+        val result = when (matchStrategy) {
             MatchStrategy.BOTH -> leftMatches && rightMatches
             MatchStrategy.EITHER -> leftMatches || rightMatches
         }
+        
+        if (result) {
+            println("[$name] ✅ 匹配成功!")
+        }
+        
+        return result
     }
     
     override fun toString(): String {

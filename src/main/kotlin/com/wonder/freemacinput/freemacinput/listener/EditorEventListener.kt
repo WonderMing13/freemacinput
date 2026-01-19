@@ -254,14 +254,29 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
                     }
                 }
                 
-                // 显示 Toast 提示
+                // 显示 Toast 提示（无论是否切换都显示，让用户知道规则生效了）
                 if (settings.isShowHints) {
                     ApplicationManager.getApplication().invokeLater {
                         val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
-                        if (activeEditor != null && switchResult.success) {
+                        if (activeEditor != null) {
                             val toastMessage = "自定义规则: ${customRuleMatch.name}"
                             val isChinese = switchResult.actualMethod == InputMethodType.CHINESE
-                            ToastManager.showToast(activeEditor, toastMessage, isChinese)
+                            logger.info("📢 显示自定义规则 Toast: $toastMessage")
+                            ToastManager.showToast(activeEditor, toastMessage, isChinese, 2500)
+                        }
+                    }
+                }
+            } else {
+                // 即使不需要切换，也显示提示（让用户知道规则匹配了）
+                if (settings.isShowHints) {
+                    ApplicationManager.getApplication().invokeLater {
+                        val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                        if (activeEditor != null) {
+                            val currentMethod = InputMethodManager.getCurrentInputMethod()
+                            val toastMessage = "自定义规则: ${customRuleMatch.name}"
+                            val isChinese = currentMethod == InputMethodType.CHINESE
+                            logger.info("📢 显示自定义规则 Toast (无需切换): $toastMessage")
+                            ToastManager.showToast(activeEditor, toastMessage, isChinese, 2500)
                         }
                     }
                 }
@@ -993,18 +1008,24 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
             return null
         }
         
-        // 获取光标左右两侧的文本
+        // 优化：只提取光标附近的文本（左右各100个字符），避免正则匹配整个文档
+        val maxContextLength = 100
+        
+        val leftStart = maxOf(0, caretOffset - maxContextLength)
         val leftText = if (caretOffset > 0) {
-            documentText.substring(0, caretOffset)
+            documentText.substring(leftStart, caretOffset)
         } else {
             ""
         }
         
+        val rightEnd = minOf(documentText.length, caretOffset + maxContextLength)
         val rightText = if (caretOffset < documentText.length) {
-            documentText.substring(caretOffset)
+            documentText.substring(caretOffset, rightEnd)
         } else {
             ""
         }
+        
+        logger.info("🔍 检查自定义规则: 左侧文本='${leftText.takeLast(20)}', 右侧文本='${rightText.take(20)}'")
         
         // 获取文件扩展名
         val fileExtension = fileName.substringAfterLast('.', "")
@@ -1012,10 +1033,12 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
         // 遍历所有规则，找到第一个匹配的
         for (rule in settings.customPatternRules) {
             if (rule.matches(leftText, rightText, fileExtension, contextType)) {
+                logger.info("✅ 匹配到规则: ${rule.name}")
                 return rule
             }
         }
         
+        logger.info("❌ 没有匹配的自定义规则")
         return null
     }
 
