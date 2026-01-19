@@ -57,7 +57,7 @@ data class CustomPatternRule(
             if (!areaMatches) return false
         }
         
-        // 检查左侧匹配：只检查最后一个字符
+        // 检查左侧匹配：使用完整左侧文本与用户正则匹配（支持 ^/$/.* 等写法）
         val leftMatches = if (leftPattern.isBlank()) {
             true
         } else {
@@ -65,9 +65,9 @@ data class CustomPatternRule(
                 if (leftText.isEmpty()) {
                     false
                 } else {
-                    val lastChar = leftText.last().toString()
-                    val matches = lastChar.matches(leftPattern.toRegex())
-                    println("[$name] 左侧: 最后字符'${leftText.last()}' 匹配 '$leftPattern' = $matches")
+                    val regex = leftPattern.toRegex()
+                    val matches = regex.containsMatchIn(leftText)
+                    println("[$name] 左侧: 文本长度=${leftText.length} 匹配 '$leftPattern' = $matches")
                     matches
                 }
             } catch (e: Exception) {
@@ -76,7 +76,7 @@ data class CustomPatternRule(
             }
         }
         
-        // 检查右侧匹配：只检查第一个字符
+        // 检查右侧匹配：使用完整右侧文本与用户正则匹配
         val rightMatches = if (rightPattern.isBlank()) {
             true
         } else {
@@ -84,9 +84,9 @@ data class CustomPatternRule(
                 if (rightText.isEmpty()) {
                     false
                 } else {
-                    val firstChar = rightText.first().toString()
-                    val matches = firstChar.matches(rightPattern.toRegex())
-                    println("[$name] 右侧: 第一字符'${rightText.first()}' 匹配 '$rightPattern' = $matches")
+                    val regex = rightPattern.toRegex()
+                    val matches = regex.containsMatchIn(rightText)
+                    println("[$name] 右侧: 文本长度=${rightText.length} 匹配 '$rightPattern' = $matches")
                     matches
                 }
             } catch (e: Exception) {
