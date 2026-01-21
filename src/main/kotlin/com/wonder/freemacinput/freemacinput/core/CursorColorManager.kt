@@ -105,6 +105,35 @@ object CursorColorManager {
     }
     
     /**
+     * 设置大写锁定状态
+     */
+    fun setCapsLockState(enabled: Boolean): Boolean {
+        return try {
+            val toolkit = java.awt.Toolkit.getDefaultToolkit()
+            val currentState = toolkit.getLockingKeyState(java.awt.event.KeyEvent.VK_CAPS_LOCK)
+            logger.info("当前 Caps Lock 状态: $currentState, 目标状态: $enabled")
+            
+            if (currentState != enabled) {
+                // 使用 Toolkit.setLockingKeyState() 直接设置状态（跨平台支持）
+                toolkit.setLockingKeyState(java.awt.event.KeyEvent.VK_CAPS_LOCK, enabled)
+                
+                // 等待状态更新
+                Thread.sleep(100)
+                
+                val newState = toolkit.getLockingKeyState(java.awt.event.KeyEvent.VK_CAPS_LOCK)
+                logger.info("Caps Lock 切换: $currentState -> $newState (目标: $enabled)")
+                
+                return newState == enabled
+            }
+            logger.info("Caps Lock 已经是目标状态，无需切换")
+            true
+        } catch (e: Exception) {
+            logger.error("设置 Caps Lock 状态失败: ${e.message}", e)
+            false
+        }
+    }
+    
+    /**
      * 将颜色转换为十六进制字符串
      */
     private fun colorToHex(color: Color): String {

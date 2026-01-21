@@ -60,7 +60,7 @@ class SettingsState : PersistentStateComponent<SettingsState> {
     // 输入法切换方案配置
     var switchStrategy: com.wonder.freemacinput.freemacinput.core.SwitchStrategy = 
         com.wonder.freemacinput.freemacinput.core.SwitchStrategy.IM_SELECT
-    var chineseInputMethodId: String = "com.apple.inputmethod.SCIM.Pinyin"  // 简体拼音
+    var chineseInputMethodId: String = "com.apple.inputmethod.SCIM.ITABC"  // 简体五笔
     var englishInputMethodId: String = "com.apple.keylayout.ABC"  // ABC
     
     init {
@@ -87,6 +87,18 @@ class SettingsState : PersistentStateComponent<SettingsState> {
                 matchStrategy = MatchStrategy.BOTH,
                 targetInputMethod = InputMethodType.CHINESE
             ),
+            // 连续大写字母切换为大写（Caps Lock）- 更具体的规则应该放在前面
+            CustomPatternRule(
+                enabled = true,
+                name = "连续大写字母切换为大写",
+                description = "左: .*[A-Z_]{3,}$，至少3个连续大写字母才开启 Caps Lock",
+                fileTypes = mutableListOf(),
+                applyToAllAreas = true,
+                leftPattern = ".*[A-Z_]{3,}$",
+                rightPattern = "",
+                matchStrategy = MatchStrategy.EITHER,
+                targetInputMethod = InputMethodType.CAPS_LOCK
+            ),
             // 大写字母之间切换为大写（英文输入）
             CustomPatternRule(
                 enabled = false,
@@ -97,18 +109,6 @@ class SettingsState : PersistentStateComponent<SettingsState> {
                 leftPattern = ".*[A-Z_ ]$",
                 rightPattern = "^[A-Z_ ].*",
                 matchStrategy = MatchStrategy.BOTH,
-                targetInputMethod = InputMethodType.ENGLISH
-            ),
-            // 连续大写字母切换为大写（英文输入）
-            CustomPatternRule(
-                enabled = true,
-                name = "连续大写字母切换为大写",
-                description = "左: .*[A-Z_]{2,}$，连续大写即可切换英文（大写）",
-                fileTypes = mutableListOf(),
-                applyToAllAreas = true,
-                leftPattern = ".*[A-Z_]{2,}$",
-                rightPattern = "",
-                matchStrategy = MatchStrategy.EITHER,
                 targetInputMethod = InputMethodType.ENGLISH
             ),
             // 英文字母之间切换为英文（字符串/注释区域，主要针对 Java）
@@ -128,32 +128,32 @@ class SettingsState : PersistentStateComponent<SettingsState> {
             ),
             // 连续英文字母切换为英文（字符串/注释区域）
             CustomPatternRule(
-                enabled = false,
+                enabled = true,
                 name = "连续英文字母切换为英文",
-                description = "左: .*[a-zA-Z]{2,}$ 右: ^[a-zA-Z]{2,}.*，字符串/注释区域匹配则切换英文",
+                description = "左: .*[a-zA-Z]{2,}$，字符串/注释区域连续英文字母切换为英文",
                 fileTypes = mutableListOf(),
                 applyToAllAreas = false,
                 applyToStringArea = true,
                 applyToCommentArea = true,
                 applyToCodeArea = false,
                 leftPattern = ".*[a-zA-Z]{2,}$",
-                rightPattern = "^[a-zA-Z]{2,}.*",
-                matchStrategy = MatchStrategy.BOTH,
+                rightPattern = "",
+                matchStrategy = MatchStrategy.EITHER,
                 targetInputMethod = InputMethodType.ENGLISH
             ),
-            // Java 代码中 final 常量切换为大写（示例规则，可按需调整）
+            // Java 代码中 final 常量切换为英文
             CustomPatternRule(
-                enabled = false,
-                name = "Java final 常量切换为大写",
-                description = "左: (?:(?:private|protected|public)\\s+)?(?:static\\s+)?final\\s+\\w*[A-Z_]+\\w*$ 右: ^\\s*\\(.*\\)?，匹配则切换英文（大写）",
+                enabled = true,
+                name = "Java final 常量切换为英文",
+                description = "左: .*\\bfinal\\s+\\S+\\s+[A-Z_][A-Z0-9_]*$，Java final 常量名切换为英文",
                 fileTypes = mutableListOf("java"),
                 applyToAllAreas = false,
                 applyToCodeArea = true,
                 applyToStringArea = false,
                 applyToCommentArea = false,
-                leftPattern = "(?:(?:private|protected|public)\\s+)?(?:static\\s+)?final\\s+\\w*[A-Z_]+\\w*$",
-                rightPattern = "^\\s*\\(.*\\)?",
-                matchStrategy = MatchStrategy.BOTH,
+                leftPattern = ".*\\bfinal\\s+\\S+\\s+[A-Z_][A-Z0-9_]*$",
+                rightPattern = "",
+                matchStrategy = MatchStrategy.EITHER,
                 targetInputMethod = InputMethodType.ENGLISH
             )
         ))

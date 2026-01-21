@@ -199,13 +199,20 @@ class StartupActivity : IJStartupActivity, DumbAware {
     }
 
     private fun registerListeners(editor: Editor, listener: EditorEventListener) {
+        val fileName = editor.virtualFile?.name ?: "untitled"
+        logger.info("📌 为编辑器注册监听器: $fileName")
+        logger.info("   - 添加 CaretListener")
         editor.caretModel.addCaretListener(listener)
+        logger.info("   - 添加 DocumentListener")
         editor.document.addDocumentListener(listener)
+        logger.info("   - 添加 EditorMouseListener")
         editor.addEditorMouseListener(object : EditorMouseListener {
             override fun mouseClicked(event: EditorMouseEvent) {
+                logger.info("🖱️ 鼠标点击编辑器: $fileName")
                 listener.onEditorActivated(event.editor)
             }
         })
+        logger.info("✅ 监听器注册完成: $fileName")
     }
 
     private fun triggerDetection(project: Project) {

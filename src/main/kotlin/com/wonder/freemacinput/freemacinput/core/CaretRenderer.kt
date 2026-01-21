@@ -36,6 +36,7 @@ enum class CaretColorTheme(
                 InputMethodType.CHINESE -> CHINESE
                 InputMethodType.AUTO -> UNKNOWN
                 InputMethodType.UNKNOWN -> UNKNOWN
+                InputMethodType.CAPS_LOCK -> ENGLISH  // Caps Lock 使用英文主题
             }
         }
     }

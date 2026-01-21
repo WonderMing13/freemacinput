@@ -35,7 +35,7 @@ class CustomPatternRuleDialog(
     private val matchStrategyComboBox = JComboBox(arrayOf("同时满足", "满足任意一个"))
     
     // 目标输入法
-    private val targetInputMethodComboBox = JComboBox(arrayOf("中文", "英文"))
+    private val targetInputMethodComboBox = JComboBox(arrayOf("中文", "英文", "大写锁定"))
     
     // 测试区域
     private val testLeftTextField = JTextField(20)
@@ -238,7 +238,12 @@ class CustomPatternRuleDialog(
         leftPatternField.text = rule.leftPattern
         rightPatternField.text = rule.rightPattern
         matchStrategyComboBox.selectedIndex = if (rule.matchStrategy == MatchStrategy.BOTH) 0 else 1
-        targetInputMethodComboBox.selectedIndex = if (rule.targetInputMethod == InputMethodType.CHINESE) 0 else 1
+        targetInputMethodComboBox.selectedIndex = when (rule.targetInputMethod) {
+            InputMethodType.CHINESE -> 0
+            InputMethodType.ENGLISH -> 1
+            InputMethodType.CAPS_LOCK -> 2
+            else -> 1
+        }
     }
     
     private fun validateInput(): Boolean {
@@ -333,7 +338,12 @@ class CustomPatternRuleDialog(
             leftPattern = leftPatternField.text.trim(),
             rightPattern = rightPatternField.text.trim(),
             matchStrategy = if (matchStrategyComboBox.selectedIndex == 0) MatchStrategy.BOTH else MatchStrategy.EITHER,
-            targetInputMethod = if (targetInputMethodComboBox.selectedIndex == 0) InputMethodType.CHINESE else InputMethodType.ENGLISH
+            targetInputMethod = when (targetInputMethodComboBox.selectedIndex) {
+                0 -> InputMethodType.CHINESE
+                1 -> InputMethodType.ENGLISH
+                2 -> InputMethodType.CAPS_LOCK
+                else -> InputMethodType.ENGLISH
+            }
         )
     }
 }

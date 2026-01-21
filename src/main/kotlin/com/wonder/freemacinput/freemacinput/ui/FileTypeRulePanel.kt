@@ -97,6 +97,7 @@ class FileTypeRulePanel : JPanel() {
                     InputMethodType.CHINESE -> "中文"
                     InputMethodType.AUTO -> "自动"
                     InputMethodType.UNKNOWN -> "未知"
+                    InputMethodType.CAPS_LOCK -> "大写锁定"
                 }
                 else -> ""
             }

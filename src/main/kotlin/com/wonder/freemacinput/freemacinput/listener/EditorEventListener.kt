@@ -29,6 +29,10 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
 
     private val contextDetector = ContextDetector()
     private val inputMethodService = InputMethodService.getInstance(project)
+    
+    init {
+        logger.info("🎬 EditorEventListener 实例创建 for project: ${project.name}")
+    }
 
     private var lastContextInfo: ContextInfo? = null
     private val timer: Timer = Timer("InputMethodSwitchTimer", true)
@@ -43,6 +47,9 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     private var capsLockMonitorTimer: Timer? = null
     private var capsLockMonitorTask: TimerTask? = null
     private var lastCapsLockState: Boolean = false
+    
+    // 记录是否由插件开启的 Caps Lock
+    private var capsLockEnabledByPlugin: Boolean = false
     
     // 输入法状态监听（用于检测用户手动切换）
     private var inputMethodMonitorTimer: Timer? = null
@@ -98,6 +105,7 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     }
 
     override fun caretPositionChanged(e: CaretEvent) {
+        logger.info("🔔 caretPositionChanged 被调用!")
         val editor = e.editor ?: run {
             logger.info("caretPositionChanged: editor is null")
             return
@@ -119,7 +127,11 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
     }
 
     override fun documentChanged(event: DocumentEvent) {
-        val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
+        logger.info("🔔 documentChanged 被调用! offset=${event.offset}, newLength=${event.newLength}")
+        val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: run {
+            logger.info("documentChanged: selectedTextEditor is null")
+            return
+        }
         
         // 检查是否输入了注释标记
         val settings = inputMethodService.getSettings()
@@ -234,6 +246,44 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
             logger.info("🎯 匹配到自定义规则: ${customRuleMatch.name} -> ${customRuleMatch.targetInputMethod}")
             val targetMethod = customRuleMatch.targetInputMethod
             
+            // 特殊处理 CAPS_LOCK 类型
+            if (targetMethod == InputMethodType.CAPS_LOCK) {
+                logger.info("⚡ 开启 Caps Lock...")
+                val success = CursorColorManager.setCapsLockState(true)
+                logger.info("✅ Caps Lock 切换结果: $success")
+                
+                // 记录是插件开启的 Caps Lock
+                if (success) {
+                    capsLockEnabledByPlugin = true
+                }
+                
+                // 更新光标颜色
+                if (success && settings.isEnableCaretColor) {
+                    ApplicationManager.getApplication().invokeLater {
+                        val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                        if (activeEditor != null) {
+                            updateCursorColor(activeEditor, InputMethodType.ENGLISH, settings)
+                        }
+                    }
+                }
+                
+                // 显示 Toast 提示
+                if (settings.isShowHints) {
+                    ApplicationManager.getApplication().invokeLater {
+                        val activeEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                        if (activeEditor != null) {
+                            val toastMessage = "自定义规则: ${customRuleMatch.name} (Caps Lock)"
+                            logger.info("📢 显示自定义规则 Toast: $toastMessage")
+                            ToastManager.showToast(activeEditor, toastMessage, false, 2500)
+                        }
+                    }
+                }
+                
+                lastContextInfo = contextInfo
+                logger.info("========== 检测结束（Caps Lock）==========\n")
+                return
+            }
+            
             // 使用 InputMethodManager 的内部状态与冷却判定
             val (should, reason) = InputMethodManager.shouldSwitch(targetMethod)
             logger.info("🔄 是否需要切换: $should, 原因: $reason")
@@ -285,6 +335,13 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
             lastContextInfo = contextInfo
             logger.info("========== 检测结束（自定义规则）==========\n")
             return
+        }
+        
+        // 没有匹配到自定义规则，检查是否需要关闭插件开启的 Caps Lock
+        if (capsLockEnabledByPlugin && isCapsLockOn()) {
+            logger.info("🔓 离开自定义规则区域，关闭插件开启的 Caps Lock")
+            CursorColorManager.setCapsLockState(false)
+            capsLockEnabledByPlugin = false
         }
 
         // 字符串场景特殊处理
@@ -1008,19 +1065,26 @@ class EditorEventListener(private val project: Project) : CaretListener, Documen
             return null
         }
         
-        // 优化：只提取光标附近的文本（左右各100个字符），避免正则匹配整个文档
-        val maxContextLength = 100
+        // 找到当前行的起始和结束位置
+        var lineStart = caretOffset
+        while (lineStart > 0 && documentText[lineStart - 1] != '\n') {
+            lineStart--
+        }
         
-        val leftStart = maxOf(0, caretOffset - maxContextLength)
-        val leftText = if (caretOffset > 0) {
-            documentText.substring(leftStart, caretOffset)
+        var lineEnd = caretOffset
+        while (lineEnd < documentText.length && documentText[lineEnd] != '\n') {
+            lineEnd++
+        }
+        
+        // 提取当前行光标左右的文本
+        val leftText = if (caretOffset > lineStart) {
+            documentText.substring(lineStart, caretOffset)
         } else {
             ""
         }
         
-        val rightEnd = minOf(documentText.length, caretOffset + maxContextLength)
-        val rightText = if (caretOffset < documentText.length) {
-            documentText.substring(caretOffset, rightEnd)
+        val rightText = if (caretOffset < lineEnd) {
+            documentText.substring(caretOffset, lineEnd)
         } else {
             ""
         }
