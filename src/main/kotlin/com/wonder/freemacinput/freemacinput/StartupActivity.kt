@@ -65,6 +65,39 @@ class StartupActivity : IJStartupActivity, DumbAware {
 
             // 初始化输入法管理器
             logger.info("初始化输入法管理器...")
+            
+            // 检查 im-select 是否安装（仅 macOS）
+            val osName = System.getProperty("os.name", "").lowercase()
+            if (osName.contains("mac")) {
+                if (!com.wonder.freemacinput.freemacinput.core.ImSelectInstaller.isInstalled()) {
+                    logger.warn("im-select 未安装")
+                    ApplicationManager.getApplication().invokeLater {
+                        val result = Messages.showYesNoDialog(
+                            "FreeMacInput 需要 im-select 工具来切换输入法。\n\n" +
+                            "是否现在安装？\n\n" +
+                            "安装方法：\n" +
+                            "• 自动安装：点击【是】，插件将通过 Homebrew 自动安装\n" +
+                            "• 手动安装：在终端执行 brew install im-select",
+                            "安装 im-select",
+                            "是",
+                            "否",
+                            Messages.getQuestionIcon()
+                        )
+                        
+                        if (result == Messages.YES) {
+                            // 尝试自动安装
+                            val (success, message) = com.wonder.freemacinput.freemacinput.core.ImSelectInstaller.install()
+                            if (success) {
+                                Messages.showInfoMessage(message, "安装成功")
+                            } else {
+                                Messages.showErrorDialog(message, "安装失败")
+                            }
+                        }
+                    }
+                    return
+                }
+            }
+            
             val initResult = InputMethodManager.initialize()
             logger.info("输入法管理器初始化结果: $initResult")
 

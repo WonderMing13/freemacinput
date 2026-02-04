@@ -21,6 +21,26 @@ object ImSelectInstaller {
      * 检查 im-select 是否已安装
      */
     fun isInstalled(): Boolean {
+        // 对于 macOS，直接检查常见路径
+        if (isMacOS) {
+            val possiblePaths = listOf(
+                "/opt/homebrew/bin/im-select",  // Apple Silicon Mac
+                "/usr/local/bin/im-select",      // Intel Mac
+                "/usr/bin/im-select"             // 其他位置
+            )
+            
+            for (path in possiblePaths) {
+                if (java.io.File(path).exists()) {
+                    logger.info("找到 im-select: $path")
+                    return true
+                }
+            }
+            
+            logger.info("未在常见路径找到 im-select")
+            return false
+        }
+        
+        // Windows 和 Linux 使用 which/where 命令
         return try {
             val command = if (isWindows) "where im-select" else "which im-select"
             val process = Runtime.getRuntime().exec(command)
@@ -36,6 +56,26 @@ object ImSelectInstaller {
      * 获取 im-select 的路径
      */
     fun getPath(): String? {
+        // 对于 macOS，直接检查常见路径
+        if (isMacOS) {
+            val possiblePaths = listOf(
+                "/opt/homebrew/bin/im-select",  // Apple Silicon Mac
+                "/usr/local/bin/im-select",      // Intel Mac
+                "/usr/bin/im-select"             // 其他位置
+            )
+            
+            for (path in possiblePaths) {
+                if (java.io.File(path).exists()) {
+                    logger.info("找到 im-select: $path")
+                    return path
+                }
+            }
+            
+            logger.info("未在常见路径找到 im-select")
+            return null
+        }
+        
+        // Windows 和 Linux 使用 which/where 命令
         return try {
             val command = if (isWindows) "where im-select" else "which im-select"
             val process = Runtime.getRuntime().exec(command)

@@ -11,25 +11,30 @@ object InputMethodManager {
     private val isMacOS = osName.contains("mac")
     private val isWindows = osName.contains("win")
 
-    // 切换冷却时间（避免频繁切换）
-    private const val SWITCH_COOLDOWN_MS = 300L
+    // 切换冷却时间（避免频繁切换）- 增加到 500ms 以减轻系统负担
+    private const val SWITCH_COOLDOWN_MS = 500L
 
     @Volatile
     private var lastSwitchTime: Long = 0
 
     @Volatile
     private var lastSwitchedTo: InputMethodType? = null
+    
+    // 防止短时间内重复切换到同一目标
+    @Volatile
+    private var pendingSwitchCount: Int = 0
+    private const val MAX_PENDING_SWITCHES = 3  // 最多允许3个待处理的切换请求
 
     // 记录当前实际输入法状态
     @Volatile
     private var currentActualMethod: InputMethodType = InputMethodType.ENGLISH
 
-    // 缓存检测到的当前输入法
+    // 缓存检测到的当前输入法 - 增加缓存时间以减少系统调用
     @Volatile
     private var cachedCurrentIM: String? = null
     @Volatile
     private var cacheTime: Long = 0
-    private const val CACHE_DURATION_MS = 500L
+    private const val CACHE_DURATION_MS = 800L  // 从 500ms 增加到 800ms
     
     // 标记是否是插件自动切换（用于区分手动切换）
     @Volatile
@@ -106,94 +111,109 @@ object InputMethodManager {
         logger.info("   switchTo 被调用: method=$method")
         logger.info("========================================")
         
-        // 标记为自动切换，持续1秒
-        isAutoSwitching = true
-        autoSwitchEndTime = System.currentTimeMillis() + 1000
-
-        if (!isMacOS && !isWindows) {
-            val result = SwitchResult(false, "不支持当前操作系统", InputMethodType.AUTO)
-            logger.warn("不支持的操作系统: $osName")
-            return result
+        // 检查待处理的切换请求数量，防止队列堆积
+        if (pendingSwitchCount >= MAX_PENDING_SWITCHES) {
+            logger.warn("⚠️ 切换请求过多（$pendingSwitchCount），跳过本次切换以保护系统服务")
+            return SwitchResult(false, "切换请求过多，已跳过", currentActualMethod)
         }
+        
+        pendingSwitchCount++
+        
+        try {
+            // 标记为自动切换，持续1秒
+            isAutoSwitching = true
+            autoSwitchEndTime = System.currentTimeMillis() + 1000
 
-        if (method == InputMethodType.AUTO) {
-            val result = SwitchResult(true, "AUTO模式，跳过切换", InputMethodType.AUTO)
-            logger.info("AUTO 模式")
-            return result
-        }
+            if (!isMacOS && !isWindows) {
+                val result = SwitchResult(false, "不支持当前操作系统", InputMethodType.AUTO)
+                logger.warn("不支持的操作系统: $osName")
+                return result
+            }
 
-        // 从配置中获取输入法ID
-        if (settings != null) {
-            macChineseIMId = settings.chineseInputMethodId
-            macEnglishIMId = settings.englishInputMethodId
-            logger.info("使用配置的输入法ID: 中文=$macChineseIMId, 英文=$macEnglishIMId")
-        }
+            if (method == InputMethodType.AUTO) {
+                val result = SwitchResult(true, "AUTO模式，跳过切换", InputMethodType.AUTO)
+                logger.info("AUTO 模式")
+                return result
+            }
 
-        // 冷却时间检查
-        val now = System.currentTimeMillis()
-        if (now - lastSwitchTime < SWITCH_COOLDOWN_MS && lastSwitchedTo == method) {
-            logger.info("冷却中，跳过切换（距上次切换: ${now - lastSwitchTime}ms）")
-            return SwitchResult(true, "冷却中", currentActualMethod)
-        }
+            // 从配置中获取输入法ID
+            if (settings != null) {
+                macChineseIMId = settings.chineseInputMethodId
+                macEnglishIMId = settings.englishInputMethodId
+                logger.info("使用配置的输入法ID: 中文=$macChineseIMId, 英文=$macEnglishIMId")
+            }
 
-        // 检测当前输入法
-        val currentIM = detectCurrentInputMethod()
-        val isChinese = isChineseInputMethod(currentIM)
-        val currentType = if (isChinese) InputMethodType.CHINESE else InputMethodType.ENGLISH
-
-        // 如果目标与当前相同，不需要切换
-        if (currentType == method) {
-            logger.info("目标与当前相同，无需切换: $method")
-            currentActualMethod = method
-            return SwitchResult(true, "已经是${if (method == InputMethodType.CHINESE) "中文" else "英文"}输入法", method)
-        }
-
-        logger.info("🎯 开始切换: $currentType → $method")
-
-        // 根据切换方案执行切换
-        val strategy = settings?.switchStrategy ?: SwitchStrategy.IM_SELECT
-        logger.info("使用切换方案: ${strategy.getDisplayName()}")
-
-        val success = when (strategy) {
-            SwitchStrategy.IM_SELECT -> {
-                when {
-                    isMacOS -> switchMacOS(method)
-                    isWindows -> switchWindows(method)
-                    else -> false
+            // 冷却时间检查 - 更严格的检查
+            val now = System.currentTimeMillis()
+            if (now - lastSwitchTime < SWITCH_COOLDOWN_MS) {
+                if (lastSwitchedTo == method) {
+                    logger.info("⏱️ 冷却中，跳过切换（距上次切换: ${now - lastSwitchTime}ms）")
+                    return SwitchResult(true, "冷却中", currentActualMethod)
                 }
             }
-            SwitchStrategy.STRATEGY_B -> {
-                logger.info("使用方案B：系统API切换")
-                if (isMacOS) {
-                    switchWithStrategyB(method)
-                } else {
-                    logger.warn("方案B仅支持 macOS")
-                    false
-                }
-            }
-            SwitchStrategy.STRATEGY_C -> {
-                logger.info("使用方案C：API识别 + 快捷键")
-                if (isMacOS) {
-                    switchWithStrategyC(method, settings)
-                } else {
-                    logger.warn("方案C仅支持 macOS")
-                    false
-                }
-            }
-        }
 
-        if (success) {
-            lastSwitchTime = now
-            lastSwitchedTo = method
-            currentActualMethod = method
-            cachedCurrentIM = null // 清除缓存
-            val message = "成功切换为${if (method == InputMethodType.CHINESE) "中文" else "英文"}输入法"
-            logger.info("✅ $message")
-            return SwitchResult(true, message, method)
-        } else {
-            val message = "切换到${if (method == InputMethodType.CHINESE) "中文" else "英文"}失败"
-            logger.error("❌ $message")
-            return SwitchResult(false, message, currentActualMethod)
+            // 检测当前输入法
+            val currentIM = detectCurrentInputMethod()
+            val isChinese = isChineseInputMethod(currentIM)
+            val currentType = if (isChinese) InputMethodType.CHINESE else InputMethodType.ENGLISH
+
+            // 如果目标与当前相同，不需要切换
+            if (currentType == method) {
+                logger.info("目标与当前相同，无需切换: $method")
+                currentActualMethod = method
+                return SwitchResult(true, "已经是${if (method == InputMethodType.CHINESE) "中文" else "英文"}输入法", method)
+            }
+
+            logger.info("🎯 开始切换: $currentType → $method")
+
+            // 根据切换方案执行切换
+            val strategy = settings?.switchStrategy ?: SwitchStrategy.IM_SELECT
+            logger.info("使用切换方案: ${strategy.getDisplayName()}")
+
+            val success = when (strategy) {
+                SwitchStrategy.IM_SELECT -> {
+                    when {
+                        isMacOS -> switchMacOS(method)
+                        isWindows -> switchWindows(method)
+                        else -> false
+                    }
+                }
+                SwitchStrategy.STRATEGY_B -> {
+                    logger.info("使用方案B：系统API切换")
+                    if (isMacOS) {
+                        switchWithStrategyB(method)
+                    } else {
+                        logger.warn("方案B仅支持 macOS")
+                        false
+                    }
+                }
+                SwitchStrategy.STRATEGY_C -> {
+                    logger.info("使用方案C：API识别 + 快捷键")
+                    if (isMacOS) {
+                        switchWithStrategyC(method, settings)
+                    } else {
+                        logger.warn("方案C仅支持 macOS")
+                        false
+                    }
+                }
+            }
+
+            if (success) {
+                lastSwitchTime = now
+                lastSwitchedTo = method
+                currentActualMethod = method
+                cachedCurrentIM = null // 清除缓存
+                val message = "成功切换为${if (method == InputMethodType.CHINESE) "中文" else "英文"}输入法"
+                logger.info("✅ $message")
+                return SwitchResult(true, message, method)
+            } else {
+                val message = "切换到${if (method == InputMethodType.CHINESE) "中文" else "英文"}失败"
+                logger.error("❌ $message")
+                return SwitchResult(false, message, currentActualMethod)
+            }
+        } finally {
+            // 无论成功失败，都减少待处理计数
+            pendingSwitchCount = maxOf(0, pendingSwitchCount - 1)
         }
     }
 
@@ -403,6 +423,13 @@ object InputMethodManager {
      * 检查 im-select 是否可用
      */
     private fun isImSelectAvailable(): Boolean {
+        // 先尝试查找完整路径
+        val imSelectPath = findImSelectPath()
+        if (imSelectPath != null) {
+            return true
+        }
+        
+        // 如果找不到完整路径，尝试直接执行
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("which", "im-select"))
             process.waitFor() == 0
@@ -416,7 +443,19 @@ object InputMethodManager {
      */
     private fun executeCommand(vararg command: String): Boolean {
         return try {
-            val process = Runtime.getRuntime().exec(command)
+            // 如果是 im-select 命令，尝试使用完整路径
+            val actualCommand = if (command.isNotEmpty() && command[0] == "im-select") {
+                val imSelectPath = findImSelectPath()
+                if (imSelectPath != null) {
+                    arrayOf(imSelectPath, *command.drop(1).toTypedArray())
+                } else {
+                    command
+                }
+            } else {
+                command
+            }
+            
+            val process = Runtime.getRuntime().exec(actualCommand)
             val exitCode = process.waitFor()
             exitCode == 0
         } catch (e: Exception) {
@@ -430,7 +469,19 @@ object InputMethodManager {
      */
     private fun executeCommandWithOutput(vararg command: String): String? {
         return try {
-            val process = Runtime.getRuntime().exec(command)
+            // 如果是 im-select 命令，尝试使用完整路径
+            val actualCommand = if (command.isNotEmpty() && command[0] == "im-select") {
+                val imSelectPath = findImSelectPath()
+                if (imSelectPath != null) {
+                    arrayOf(imSelectPath, *command.drop(1).toTypedArray())
+                } else {
+                    command
+                }
+            } else {
+                command
+            }
+            
+            val process = Runtime.getRuntime().exec(actualCommand)
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val output = reader.readText().trim()
             process.waitFor()
@@ -439,6 +490,42 @@ object InputMethodManager {
             logger.error("执行命令失败: ${command.joinToString(" ")}", e)
             null
         }
+    }
+    
+    /**
+     * 查找 im-select 的完整路径
+     */
+    private fun findImSelectPath(): String? {
+        // 常见的 im-select 安装路径
+        val possiblePaths = listOf(
+            "/opt/homebrew/bin/im-select",  // Apple Silicon Mac
+            "/usr/local/bin/im-select",      // Intel Mac
+            "/usr/bin/im-select"             // 其他位置
+        )
+        
+        for (path in possiblePaths) {
+            if (java.io.File(path).exists()) {
+                logger.info("找到 im-select: $path")
+                return path
+            }
+        }
+        
+        // 尝试使用 which 命令查找
+        try {
+            val process = Runtime.getRuntime().exec(arrayOf("/bin/sh", "-c", "which im-select"))
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val path = reader.readLine()?.trim()
+            process.waitFor()
+            if (!path.isNullOrEmpty() && java.io.File(path).exists()) {
+                logger.info("通过 which 找到 im-select: $path")
+                return path
+            }
+        } catch (e: Exception) {
+            logger.warn("使用 which 查找 im-select 失败", e)
+        }
+        
+        logger.warn("未找到 im-select 的完整路径")
+        return null
     }
 
     /**

@@ -30,7 +30,7 @@ class SettingsState : PersistentStateComponent<SettingsState> {
     // 各场景默认输入法
     var defaultMethod: InputMethodType = InputMethodType.ENGLISH
     var commentMethod: InputMethodType = InputMethodType.CHINESE
-    var stringMethod: InputMethodType = InputMethodType.CHINESE
+    var stringMethod: InputMethodType = InputMethodType.ENGLISH  // 字符串场景默认英文
 
     // 默认场景配置（文件类型规则）
     var fileTypeRules: MutableList<FileTypeRule> = mutableListOf()
@@ -44,14 +44,14 @@ class SettingsState : PersistentStateComponent<SettingsState> {
     var enableStringRescue: Boolean = true
 
     // 离开IDE场景配置（仅macOS）
-    var leaveIDEStrategy: LeaveIDEStrategy = LeaveIDEStrategy.RESTORE_PREVIOUS
+    var leaveIDEStrategy: LeaveIDEStrategy = LeaveIDEStrategy.ENGLISH  // 默认切换为英文
     var inputMethodBeforeEnterIDE: String? = null
 
     // 工具窗口场景配置
     var toolWindowRules: MutableList<ToolWindowRule> = mutableListOf()
     
     // 自定义事件场景配置
-    var enableEventLogging: Boolean = false
+    var enableEventLogging: Boolean = true  // 默认开启事件日志
     var customEventRules: MutableList<CustomEventRule> = mutableListOf()
     
     // 自定义规则场景配置
@@ -101,7 +101,7 @@ class SettingsState : PersistentStateComponent<SettingsState> {
             ),
             // 大写字母之间切换为大写（英文输入）
             CustomPatternRule(
-                enabled = false,
+                enabled = true,  // 默认启用
                 name = "大写字母之间切换为大写",
                 description = "左: .*[A-Z_ ]$ 右: ^[A-Z_ ].*，匹配则切换英文（大写）",
                 fileTypes = mutableListOf(),
@@ -111,30 +111,30 @@ class SettingsState : PersistentStateComponent<SettingsState> {
                 matchStrategy = MatchStrategy.BOTH,
                 targetInputMethod = InputMethodType.ENGLISH
             ),
-            // 英文字母之间切换为英文（字符串/注释区域，主要针对 Java）
+            // 英文字母之间切换为英文（仅字符串区域，主要针对 Java）
             CustomPatternRule(
-                enabled = false,
+                enabled = true,  // 默认启用
                 name = "英文字母之间切换为英文",
-                description = "左: .*[a-zA-Z]$ 右: ^[a-zA-Z].*，字符串/注释区域匹配则切换英文",
+                description = "左: .*[a-zA-Z]$ 右: ^[a-zA-Z].*，字符串区域匹配则切换英文",
                 fileTypes = mutableListOf("java"),
                 applyToAllAreas = false,
                 applyToStringArea = true,
-                applyToCommentArea = true,
+                applyToCommentArea = false,  // 注释区域不应用此规则，避免干扰中文输入
                 applyToCodeArea = false,
                 leftPattern = ".*[a-zA-Z]$",
                 rightPattern = "^[a-zA-Z].*",
                 matchStrategy = MatchStrategy.BOTH,
                 targetInputMethod = InputMethodType.ENGLISH
             ),
-            // 连续英文字母切换为英文（字符串/注释区域）
+            // 连续英文字母切换为英文（仅字符串区域）
             CustomPatternRule(
                 enabled = true,
                 name = "连续英文字母切换为英文",
-                description = "左: .*[a-zA-Z]{2,}$，字符串/注释区域连续英文字母切换为英文",
+                description = "左: .*[a-zA-Z]{2,}$，字符串区域连续英文字母切换为英文",
                 fileTypes = mutableListOf(),
                 applyToAllAreas = false,
                 applyToStringArea = true,
-                applyToCommentArea = true,
+                applyToCommentArea = false,  // 注释区域不应用此规则，避免干扰中文输入
                 applyToCodeArea = false,
                 leftPattern = ".*[a-zA-Z]{2,}$",
                 rightPattern = "",
